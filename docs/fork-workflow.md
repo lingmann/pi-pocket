@@ -60,7 +60,9 @@ For example, starting from `victor/v0.1.0` based on upstream `v0.13.2`:
 
 ## Checks and recovery
 
-`just check` is a baseline. Add [shared/upstream coverage](victor.md#focused-test-coverage) and manual device checks as needed. [Known failures](../TEST_ISSUES.md) still fail the gate.
+`just check` is a baseline. The `Fork checks` GitHub Actions job runs the same checks on PRs to `main` and pushes to `main`, using Node 24 and Chrome. It fails if Chrome is unavailable, rather than silently skipping browser tests. Add [shared/upstream coverage](victor.md#focused-test-coverage) and manual device checks as needed. [Known failures](../TEST_ISSUES.md) still fail the gate.
+
+GitHub requires PRs and passing, up-to-date `Fork checks` before merging, including for administrators. Non-admins need one approving review; administrators may bypass that review when merging through a PR. Approval is enforced by a separate ruleset so this exemption does not bypass the other branch protections. Authors still cannot approve their own PRs. Repository settings allow squash and merge commits, disable rebase merging, and protect `main` from force-pushes and deletion without requiring linear history. Published tags cannot be updated or deleted; new tags can still be created. These GitHub settings are configured separately, not by the recipes.
 
 For update conflicts, resolve and stage files, then `git merge --continue`; cancel with `git merge --abort`. The update branch and fetched refs remain.
 
