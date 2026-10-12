@@ -2,22 +2,10 @@
 import { useEffect, useState } from "preact/hooks";
 import { api, attempt, closeSheet, notify, sessionUnread } from "./store.js";
 import { html, Loader, Sheet, Switch } from "./ui.js";
+import { registerWorker } from "./service-worker.js";
 
-const supported =
-    "serviceWorker" in navigator && "PushManager" in globalThis && "Notification" in globalThis;
-
-let registering = null;
-
-/** The service worker that shows notifications. Push needs a secure page: https, or localhost. */
-export function registerWorker() {
-    if (!supported || !isSecureContext) {
-        return Promise.resolve(null);
-    }
-
-    registering ??= navigator.serviceWorker.register("/sw.js").catch(() => null);
-
-    return registering;
-}
+const workerSupported = "serviceWorker" in navigator;
+const supported = workerSupported && "PushManager" in globalThis && "Notification" in globalThis;
 
 /** The count on the icon, null until this page sets it: the service worker may have set one meanwhile. */
 let badged = null;
@@ -114,7 +102,9 @@ export function NotificationsSheet() {
     useEffect(() => {
         attempt(async () => setInfo(await api("push")));
         registerWorker()
-            .then((registration) => registration?.pushManager.getSubscription() ?? null)
+            .then((registration) =>
+                supported ? (registration?.pushManager.getSubscription() ?? null) : null,
+            )
             .then(setSubscription, () => setSubscription(null));
     }, []);
 

@@ -30,6 +30,7 @@ A drop-in extension survives updates to Pi Pocket and can be turned off from the
 - [map.md](map.md): where each part of the code is, and how to add the common things.
 - [architecture.md](architecture.md): how the parts depend on each other, and the orderings they rely on.
 - [features.md](features.md): what each feature does, as people use it.
+- [victor.md](victor.md): on-device Victor setup, use, updates, and troubleshooting.
 - [../SECURITY.md](../SECURITY.md): what Pi Pocket protects, and what it does not.
 
 ## Before you change anything

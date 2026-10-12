@@ -161,6 +161,12 @@ Plain ES modules, served as they are, with no build. Editing a file under `web/`
 - The `pocket.*` keys in local and session storage.
 - `ATTACHMENTS_HEADING`, which `ui.js` repeats from `entry-format.ts`.
 
+### Browser-local Victor
+
+Victor runs recognition and speech in the foreground browser; only recognized text uses the normal submission API. Stopping Victor releases local audio but never aborts Pi's shared run. Missing or invalid prepared assets affect only Victor requests, not ordinary app startup.
+
+See [victor.md](victor.md) for setup, use, updates, and troubleshooting. Implementation details live in the Victor source and tests.
+
 ## Checking a change
 
 - **Every change:** `npm run check` (types, and no unused imports or locals in the TypeScript), `npm run lint`, and `npm test`.

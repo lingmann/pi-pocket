@@ -12,6 +12,7 @@
 // helpers.ts first: it points Pi's folder at a temporary one before anything from src/ loads.
 import { cleanUp, newSession, openApp, root, say, scriptedModel } from "./helpers.ts";
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { APP_ROOT } from "../src/server/config.ts";
 import { createHandler } from "../src/server/http.ts";
@@ -20,7 +21,30 @@ import { watchTree } from "../src/server/reload.ts";
 const port = Number(process.argv[2] ?? 8899);
 const host = process.argv[3] ?? "127.0.0.2";
 const app = await openApp(scriptedModel());
-const server = createServer(createHandler({ app, listen: { host, port }, restart: () => {} }));
+const handler = createHandler({ app, listen: { host, port }, restart: () => {} });
+// Optional recorded input for the victor E2E check. Never served by the production handler.
+const victorFixture = process.env.POCKET_VICTOR_FIXTURE;
+const victorWav = victorFixture ? readFileSync(victorFixture) : null;
+const victorInput = victorWav ? readFileSync(join(APP_ROOT, "test", "victor-input.js")) : null;
+const server = createServer((request, response) => {
+    if (
+        victorWav &&
+        request.method === "GET" &&
+        (request.url === "/__test/victor.wav" || request.url === "/__test/victor-input.js")
+    ) {
+        const script = request.url.endsWith(".js");
+
+        response.writeHead(200, {
+            "Content-Type": script ? "text/javascript; charset=utf-8" : "audio/wav",
+            "Cache-Control": "no-store",
+        });
+        response.end(script ? victorInput : victorWav);
+
+        return;
+    }
+
+    void handler(request, response);
+});
 const stopWatching = watchTree(join(APP_ROOT, "web"), (file) => app.reloadClients(file));
 
 // Extension modules reload when saved, as in the real server (`app.close()` stops this).
