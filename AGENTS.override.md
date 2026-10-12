@@ -1,6 +1,6 @@
 # Working on the Victor fork
 
-This Pi Pocket fork is maintained on `feature/victor`.
+Follow the [shared-fork workflow](docs/fork-workflow.md): squash feature/fix PRs, merge upstream-update PRs with a merge commit, and never rewrite shared main or release tags.
 
 Read the adjacent [AGENTS.md](AGENTS.md). Follow its upstream guidance except where this file explicitly overrides it. Pi loads this file instead of that file, not in addition to it.
 
