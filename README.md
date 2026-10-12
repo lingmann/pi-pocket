@@ -40,7 +40,8 @@ While it runs: **q** quit · **r** restart server · **a** change access · **o*
 - **PiP, your assistant.** Alt+A opens "Pi in Pocket" over any screen: it lists, reads, starts, and messages your other sessions, follows their runs, and tells you what came of them. What sessions and GitHub say reaches it as data, never as instructions.
 - **Watches and webhooks.** Tell PiP to watch a GitHub repository ("when CI fails on main, fix it and tell me"), or watch a pull request from a session until it merges; webhooks bring other services' posts to Pi. Only the repository's own people count, unless you say anyone.
 - **Memory.** Lessons Pi keeps across sessions, per project or everywhere. Pi proposes them; the owner approves what it saw.
-- **Dictation.** Speak into the message box, or PiP's, with the browser's own speech recognition.
+- **Dictation.** Speak into the message box, or PiP's, with the browser's own speech recognition (Web Speech API).
+- **Victor (experimental, English).** This fork's separate on-device conversation mode recognizes speech and reads Pi's replies locally. Tap **Victor**, then say “send it” to submit. Prepare the pinned assets with `node scripts/prepare-victor-assets.mjs`; the first browser download is about 149 MB. See [Victor setup and limits](docs/victor.md).
 - **Forks.** Fork from any reply, edit a message and send it again, or retry it with another model. Each fork is a session of its own, optionally in a git worktree of its own.
 - **Works while you're away.** Schedule messages to Pi (`/schedule every weekday 8:00 summarize CI`), and `/until npm test` keeps Pi going until the check passes.
 - **Plan mode.** Pi reads and proposes a plan; nothing changes until someone approves it.
@@ -71,6 +72,19 @@ Choose a mode in the launcher, or pass `--access`:
 | `tailscale`  | Your tailnet         | Tailscale address only, encrypted by the tailnet                                                                                                                                                            |
 
 Cloudflare mode needs `cloudflared`. On Linux the launcher can download the official release into `~/.pi-pocket/bin`. To use another tunnel (ngrok, `tailscale serve`), choose `local` and point the tunnel at port 8787.
+
+### HTTPS with Tailscale Serve
+
+With Tailscale connected and `just` installed, run `just start` from this checkout. It configures a persistent, tailnet-only HTTPS proxy on port **8443**, leaving any service on port 443 untouched, then starts Pi Pocket on `127.0.0.1:8787`. Open the HTTPS address printed by Tailscale on your phone, with Tailscale connected there too. Sign in again on the new address; HTTPS enables browser dictation and push notifications.
+
+Run `just` to list the recipes:
+
+- `just tailscale-setup`: configure the HTTPS proxy without starting Pi Pocket.
+- `just start-local`: start Pi Pocket on loopback without changing Serve's configuration.
+- `just tailscale-stop`: remove only the port-8443 proxy, leaving Pi Pocket running.
+- `just tailscale-status`: show the configured routes and addresses.
+
+On macOS the recipes use the Tailscale app's CLI when installed; elsewhere they use `tailscale` from `PATH`. Set `TAILSCALE_BIN` to override that path. Serve's `--bg` configuration survives restarts, but Pi Pocket runs in the foreground. Stop Pi Pocket with `q` or Ctrl+C, then run `just tailscale-stop` if you also want to remove its HTTPS proxy. Port 443 stays untouched. These recipes do not start Pi Pocket at system login. Stop any existing Pi Pocket instance before running either start recipe.
 
 > [!WARNING]
 > Anyone with steering rights can make the agent run commands on this machine, as you. That reaches everything you can: your files, Pi Pocket's own settings and sign-in tokens, and its code. A single-session invite limits what someone sees in the app, not what Pi can reach, and Lancet Guard approvals can come from anyone who can steer, including the person who asked. People who can steer every session can also invite others. Invite only people you would trust at your keyboard. View-only users cannot make Pi act.

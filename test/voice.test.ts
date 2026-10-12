@@ -39,6 +39,7 @@ type Voice = {
         options?: { top?: boolean },
     ) => Dictation;
     toggleDictation: () => boolean;
+    setDictationBlocked: (blocked: boolean) => void;
 };
 
 const recognitions: Recognition[] = [];
@@ -275,6 +276,32 @@ test("Alt+V dictates into PiP's box while it shows, else into the newest box the
     recognitions.at(-1)!.onresult!(said(["for the session", false]));
     assert.equal(session.box.value, "For the session");
     session.dictation.stop();
+    unmountAll();
+});
+
+test("Victor blocks existing, PiP, and newly mounted dictation until released", () => {
+    const session = dictate("Keep this");
+    const recognition = recognitions.at(-1)!;
+
+    voice.setDictationBlocked(true);
+    voice.setDictationBlocked(true);
+    assert.equal(recognition.started, false);
+    assert.equal(recognition.onresult, null, "late results are discarded");
+    assert.equal(session.box.value, "Keep this");
+    const count = recognitions.length;
+    const pip = dictate("PiP draft", { top: true });
+
+    session.dictation.toggle();
+    pip.dictation.toggle();
+    voice.toggleDictation();
+    assert.equal(recognitions.length, count, "neither mounting nor Alt+V bypasses the block");
+    voice.setDictationBlocked(false);
+    voice.setDictationBlocked(false);
+    assert.equal(voice.toggleDictation(), true);
+    assert.equal(recognitions.length, count + 1);
+    recognitions.at(-1)!.onresult!(said(["restored", true]));
+    assert.equal(pip.box.value, "PiP draft restored");
+    assert.equal(session.box.value, "Keep this");
     unmountAll();
 });
 

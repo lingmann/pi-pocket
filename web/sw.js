@@ -1,6 +1,8 @@
 // Pi Pocket's service worker. It shows push notifications (Pi finished, an approval, a chat message), answers an
 // approval from its notification, opens the right session when one is tapped, and hands things shared to Pi Pocket
-// from other apps to the page. It caches none of the app: the app is edited live.
+// from other apps to the page. Only immutable victor bundles are cached; the app itself is edited live.
+importScripts("/victor-cache.js");
+
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 
@@ -165,5 +167,9 @@ self.addEventListener("fetch", (event) => {
         url.pathname === "/share"
     ) {
         event.respondWith(receiveShare(event.request));
+
+        return;
     }
+
+    self.pocketVictorCache.handleFetch(event);
 });

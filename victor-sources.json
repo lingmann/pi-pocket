@@ -1,0 +1,113 @@
+{
+    "schemaVersion": 1,
+    "runtime": {
+        "script": "sherpa-onnx-wasm-web.js",
+        "wrapper": "sherpa-onnx-asr.js",
+        "wasm": "sherpa-onnx-wasm-web.wasm",
+        "ttsWrapper": "sherpa-onnx-tts.js"
+    },
+    "model": {
+        "type": "zipformer2",
+        "encoder": "encoder.onnx",
+        "decoder": "decoder.onnx",
+        "joiner": "joiner.onnx",
+        "tokens": "tokens.txt",
+        "sampleRate": 16000,
+        "featureDim": 80
+    },
+    "tts": {
+        "type": "kitten",
+        "model": "tts/model.onnx",
+        "voices": "tts/voices.bin",
+        "tokens": "tts/tokens.txt",
+        "dataDir": "tts/espeak-ng-data",
+        "sampleRate": 24000,
+        "pronunciation": {
+            "source": "tts",
+            "prefix": "kitten-micro-en-v0_8/espeak-ng-data/"
+        }
+    },
+    "sources": {
+        "runtime": {
+            "url": "https://pub.dev/api/archives/sherpa_onnx_web-1.13.8.tar.gz",
+            "sha256": "e25a3813eb080636280b23dd4b0098252902675158b66dceda1efba061adf5d7",
+            "revision": "8b5a9990d2d787d6a7d4238b0d2e7777090bfd03"
+        },
+        "model": {
+            "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06.tar.bz2",
+            "sha256": "c8676e5ff9ac2a85296e53ee0fd4d5fb1db6770e7a7647166eeafe349ade6834"
+        },
+        "tts": {
+            "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-micro-en-v0_8.tar.bz2",
+            "sha256": "85faaea7511ca9d1d2f251fed0a4553bdf0d1ee046102fa60ddd8046c751f76f"
+        }
+    },
+    "assets": [
+        {
+            "name": "sherpa-onnx-wasm-web.js",
+            "source": "runtime",
+            "member": "assets/sherpa-onnx-wasm-web.js",
+            "contentType": "text/javascript; charset=utf-8"
+        },
+        {
+            "name": "sherpa-onnx-asr.js",
+            "source": "runtime",
+            "member": "assets/sherpa-onnx-asr.js",
+            "contentType": "text/javascript; charset=utf-8"
+        },
+        {
+            "name": "sherpa-onnx-wasm-web.wasm",
+            "source": "runtime",
+            "member": "assets/sherpa-onnx-wasm-web.wasm",
+            "contentType": "application/wasm"
+        },
+        {
+            "name": "encoder.onnx",
+            "source": "model",
+            "member": "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06/encoder.onnx",
+            "contentType": "application/octet-stream"
+        },
+        {
+            "name": "decoder.onnx",
+            "source": "model",
+            "member": "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06/decoder.onnx",
+            "contentType": "application/octet-stream"
+        },
+        {
+            "name": "joiner.onnx",
+            "source": "model",
+            "member": "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06/joiner.onnx",
+            "contentType": "application/octet-stream"
+        },
+        {
+            "name": "tokens.txt",
+            "source": "model",
+            "member": "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06/tokens.txt",
+            "contentType": "text/plain; charset=utf-8"
+        },
+        {
+            "name": "sherpa-onnx-tts.js",
+            "source": "runtime",
+            "member": "assets/sherpa-onnx-tts.js",
+            "contentType": "text/javascript; charset=utf-8"
+        },
+        {
+            "name": "tts/model.onnx",
+            "source": "tts",
+            "member": "kitten-micro-en-v0_8/model.onnx",
+            "contentType": "application/octet-stream"
+        },
+        {
+            "name": "tts/tokens.txt",
+            "source": "tts",
+            "member": "kitten-micro-en-v0_8/tokens.txt",
+            "contentType": "application/octet-stream"
+        },
+        {
+            "name": "tts/voices.bin",
+            "source": "tts",
+            "member": "kitten-micro-en-v0_8/voices.bin",
+            "contentType": "application/octet-stream"
+        }
+    ]
+}

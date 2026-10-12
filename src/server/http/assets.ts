@@ -1,4 +1,4 @@
-/** The web app's own files and the modules it imports, its content security policy, and image files it shows. */
+/** The web app's files, content security policies, and image files it shows. */
 import { createHash } from "node:crypto";
 import { closeSync, createReadStream, openSync, readFileSync, readSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -6,6 +6,7 @@ import { extname, join } from "node:path";
 import { APP_ROOT } from "../config.ts";
 import { HttpError } from "../errors.ts";
 import { send } from "./io.ts";
+import { victorScriptPolicy } from "./victor-assets.ts";
 
 export const WEB = join(APP_ROOT, "web");
 const MODULES = join(APP_ROOT, "node_modules");
@@ -112,7 +113,7 @@ function appPolicy(html: string): string {
 
     return [
         "default-src 'self'",
-        ["script-src 'self'", ...hashes].join(" "),
+        ["script-src 'self' 'wasm-unsafe-eval'", ...hashes].join(" "),
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data: blob:",
         "media-src 'self' data: blob:",
@@ -163,6 +164,7 @@ export function serveFile(response: ServerResponse, file: string, fallbackType?:
         fallbackType ?? TYPES[extname(file).toLowerCase()] ?? "application/octet-stream",
         {
             "cache-control": "no-cache",
+            ...victorScriptPolicy(file),
         },
     );
 }

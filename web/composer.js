@@ -30,6 +30,8 @@ import { SubagentsBar } from "./subagents.js";
 import { TrustBar } from "./trust.js";
 import { prefs } from "./theme.js";
 import { MicButton, useDictation } from "./voice.js";
+import { victorMode } from "./victor-mode.js";
+import { useVictorMode, VictorButton, VictorControls } from "./victor-controls.js";
 import {
     APPLE,
     contextLevel,
@@ -347,6 +349,10 @@ function WatchBar() {
 
 export function Composer() {
     const { view, conversationId } = store.state;
+    const victor = useVictorMode();
+    const victorActive = victor.phase !== "off";
+    const victorOwner = useRef(null);
+    const mounted = useRef(true);
     const [text, setText] = useState(() => drafts.get(conversationId));
     const [files, setFiles] = useState([]);
     const [steer, setSteer] = useState(true);
@@ -381,6 +387,65 @@ export function Composer() {
     const requestId = useRef(uid());
     const busy = view.live.busy;
     const agent = view.agent;
+
+    useEffect(() => {
+        mounted.current = true;
+
+        return () => {
+            mounted.current = false;
+
+            if (victorOwner.current === conversationId && victorMode.active) {
+                victorMode.disable();
+            }
+        };
+    }, [conversationId]);
+
+    const toggleVictor = () => {
+        if (victorMode.active) {
+            victorMode.disable();
+            victorOwner.current = null;
+
+            return;
+        }
+
+        const { conversationId: id } = store.state;
+        let reason = victorMode.unavailable(id);
+
+        if (!reason && sending) {
+            reason = "Wait until your message is sent before turning Victor on.";
+        } else if (!reason && (text !== "" || drafts.get(id) !== "" || files.length > 0)) {
+            reason = "Send or clear your draft and attachments before turning Victor on.";
+        }
+
+        if (reason) {
+            notify("info", reason);
+
+            return;
+        }
+
+        victorOwner.current = id;
+        setBrowsing(null);
+        setSearching(false);
+        victorMode.enable({
+            conversationId: id,
+            preserveDraft(value) {
+                if (!value.trim()) {
+                    return;
+                }
+
+                // Navigation may have unmounted this box. Save to the captured conversation, never the new one.
+                const current = drafts.get(id);
+                const next = current.trim() ? `${current.replace(/\s+$/, "")}\n\n${value}` : value;
+
+                drafts.set(id, next);
+
+                if (mounted.current && store.state.conversationId === id) {
+                    setText(next);
+                    setCaret(next.length);
+                }
+            },
+        });
+    };
 
     useEffect(() => {
         const draft = drafts.get(conversationId);
@@ -420,6 +485,11 @@ export function Composer() {
         }
 
         insertedUpTo = insert.n;
+
+        if (victorMode.active && (insert.text || insert.files?.length > 0)) {
+            victorMode.disable();
+            notify("info", "Victor turned off to keep the content added to your draft.");
+        }
 
         if (insert.files?.length > 0) {
             addFiles(insert.files);
@@ -587,6 +657,7 @@ export function Composer() {
     const filled = text.trim() !== "" || files.length > 0;
     const uploading = files.some((file) => file.state === "uploading");
     const canSend =
+        !victorActive &&
         !sending &&
         !uploading &&
         (text.trim() !== "" || files.some((file) => file.state === "done"));
@@ -633,7 +704,7 @@ export function Composer() {
     };
 
     const send = async () => {
-        if (!canSend) {
+        if (victorMode.active || !canSend) {
             return;
         }
 
@@ -739,6 +810,10 @@ export function Composer() {
     };
 
     const onKey = (event) => {
+        if (victorMode.active) {
+            return;
+        }
+
         if (
             event.ctrlKey &&
             !event.metaKey &&
@@ -880,6 +955,12 @@ export function Composer() {
     };
 
     const addFiles = (list) => {
+        if (victorMode.active) {
+            notify("info", "Turn Victor off to attach files.");
+
+            return;
+        }
+
         for (const file of list) {
             const key = uid();
             const preview = file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
@@ -909,6 +990,12 @@ export function Composer() {
     };
 
     const onPaste = (event) => {
+        if (victorMode.active) {
+            event.preventDefault();
+
+            return;
+        }
+
         const pastedFiles = [...(event.clipboardData?.files ?? [])];
 
         if (pastedFiles.length > 0) {
@@ -942,13 +1029,15 @@ export function Composer() {
         );
     };
 
-    const placeholder = dictation.listening
-        ? "Listening…"
-        : busy
-          ? steer
-              ? "Steer the current run…"
-              : "Queue a message for after this run…"
-          : "Ask Pi anything…";
+    const placeholder = victorActive
+        ? "Turn Victor off to type a message…"
+        : dictation.listening
+          ? "Listening…"
+          : busy
+            ? steer
+                ? "Steer the current run…"
+                : "Queue a message for after this run…"
+            : "Ask Pi anything…";
     const inbox = view.inbox ?? [];
     const { me, users } = store.state;
     const queuedBy = (item) =>
@@ -975,6 +1064,7 @@ export function Composer() {
                 <${SubagentsBar} />
             </div>
             <${ParentSessionButton} />
+            <${VictorControls} state=${victor} toggle=${toggleVictor} />
             <div class="view-only">
                 <span>
                     <strong>View only.</strong> You can read along, react, and chat with the people here.
@@ -1038,6 +1128,7 @@ export function Composer() {
             <${TrustBar} />
         </div>
         <${ParentSessionButton} />
+        <${VictorControls} state=${victor} toggle=${toggleVictor} />
         ${
             blocked
                 ? html`${
@@ -1201,7 +1292,7 @@ export function Composer() {
                     </div>`
                 }
                 <div
-                    class=${`composer ${busy ? "busy" : ""} ${filled ? "filled" : ""}`}
+                    class=${`composer ${busy ? "busy" : ""} ${filled ? "filled" : ""} ${victorActive ? "victor-active" : ""}`}
                     onClick=${(event) => {
                         // The box is one target: a tap on its edge, around the files sent along, between its buttons,
                         // or on Send with nothing to send (a disabled button takes no taps), goes to the text.
@@ -1251,8 +1342,13 @@ export function Composer() {
                         ref=${setBox}
                         rows="1"
                         value=${text}
+                        readOnly=${victorActive}
                         placeholder=${placeholder}
                         onInput=${(event) => {
+                            if (victorMode.active) {
+                                return;
+                            }
+
                             setBrowsing(null);
                             update(event.currentTarget.value, event.currentTarget.selectionStart);
                         }}
@@ -1269,6 +1365,7 @@ export function Composer() {
                             class="icon-button attach-button"
                             aria-label="Attach files"
                             title="Attach files"
+                            disabled=${victorActive}
                             onClick=${() => picker.current?.click()}
                         >
                             <${Icon} name="clip" size=${17} />
@@ -1278,6 +1375,7 @@ export function Composer() {
                             type="file"
                             multiple
                             hidden
+                            disabled=${victorActive}
                             onChange=${(event) => {
                                 addFiles([...event.currentTarget.files]);
                                 event.currentTarget.value = "";
@@ -1304,6 +1402,7 @@ export function Composer() {
                                 Plan
                             </button>`
                         }
+                        ${!victorActive && !busy && html`<${VictorButton} toggle=${toggleVictor} />`}
                         ${
                             busy &&
                             html`<div

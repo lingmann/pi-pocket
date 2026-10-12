@@ -29,6 +29,20 @@ let current = null;
  * else into the newest in the page: one gone for now (view only, someone else's turn) is passed over.
  */
 const boxes = [];
+let dictationBlocked = false;
+
+/** Victor mode owns local audio while enabled, including errors; block dictation in every box and Alt+V. */
+export function setDictationBlocked(blocked) {
+    dictationBlocked = Boolean(blocked);
+
+    if (dictationBlocked) {
+        current?.stop(true);
+    }
+
+    for (const box of boxes) {
+        box.setBlocked(dictationBlocked);
+    }
+}
 
 /** Alt+V: start or stop dictation in PiP's box or the newest; false when no box can. */
 export function toggleDictation() {
@@ -92,6 +106,7 @@ function join(before, words, after) {
  */
 export function useDictation(box, onText, { top = false } = {}) {
     const [listening, setListening] = useState(false);
+    const [blocked, setBlocked] = useState(dictationBlocked);
     const hear = useRef(onText);
     const self = useRef(null);
 
@@ -101,6 +116,7 @@ export function useDictation(box, onText, { top = false } = {}) {
         self.current = {
             box,
             top,
+            setBlocked,
             recognition: null,
             /** Stop listening: `drop` throws away what is not settled yet, and anything heard after. */
             stop(drop = false) {
@@ -125,10 +141,16 @@ export function useDictation(box, onText, { top = false } = {}) {
                 }
             },
             start() {
+                if (dictationBlocked) {
+                    notify("info", "Turn Victor off to use browser dictation.");
+
+                    return;
+                }
+
                 const element = box.current;
                 const Recognition = Recognizer();
 
-                if (!element || typeof Recognition !== "function") {
+                if (!element || element.readOnly || typeof Recognition !== "function") {
                     return;
                 }
 
@@ -199,6 +221,10 @@ export function useDictation(box, onText, { top = false } = {}) {
                 };
 
                 recognition.onresult = (event) => {
+                    if (dictationBlocked) {
+                        return;
+                    }
+
                     const results = event.results;
 
                     if (
@@ -306,6 +332,7 @@ export function useDictation(box, onText, { top = false } = {}) {
         const hidden = () => document.hidden && dictation.stop();
 
         boxes.push(dictation);
+        setBlocked(dictationBlocked);
         document.addEventListener("visibilitychange", hidden);
 
         return () => {
@@ -317,6 +344,7 @@ export function useDictation(box, onText, { top = false } = {}) {
 
     return {
         listening,
+        blocked,
         toggle: () => dictation.toggle(),
         stop: (drop) => dictation.stop(drop),
     };
@@ -328,14 +356,15 @@ export function MicButton({ dictation, class: className = "", size = 17 }) {
         return null;
     }
 
-    const { listening, toggle } = dictation;
+    const { listening, blocked, toggle } = dictation;
 
     return html`<button
         type="button"
         class=${`icon-button mic-button ${listening ? "listening" : ""} ${className}`}
         aria-label="Dictate"
         aria-pressed=${listening ? "true" : "false"}
-        title=${listening ? "Listening: tap to stop (Alt V)" : "Dictate (Alt V)"}
+        title=${blocked ? "Turn Victor off to use browser dictation" : listening ? "Listening: tap to stop (Alt V)" : "Dictate (Alt V)"}
+        disabled=${blocked}
         onMouseDown=${(event) => event.preventDefault()}
         onClick=${toggle}
     >

@@ -1,0 +1,103 @@
+/* On-device victor has its own draft; the regular box stays read-only until Victor is turned off. */
+.victor-mode {
+    margin-bottom: 4px;
+}
+
+.victor-mode.on {
+    padding: 6px 8px;
+    border: 1px solid var(--accent-line);
+    background: var(--card);
+}
+
+.victor-mode.error {
+    border-color: var(--err);
+}
+
+.victor-mode-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 40px;
+}
+
+.victor-mode-row > button {
+    flex: none;
+    min-height: 40px;
+}
+
+.victor-toggle {
+    color: var(--muted);
+}
+
+.victor-speed {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.75rem;
+    color: var(--muted);
+}
+
+.victor-speed select {
+    width: auto;
+    min-height: 40px;
+    padding: 4px;
+}
+
+.victor-status,
+.victor-message {
+    font-size: 0.75rem;
+    color: var(--muted);
+}
+
+.victor-status {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.victor-mode.error .victor-status {
+    color: var(--err);
+}
+
+.victor-draft {
+    margin-top: 6px;
+    max-height: 18vh;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.victor-message {
+    margin: 6px 0 0;
+    overflow-wrap: anywhere;
+}
+
+.composer.victor-active textarea {
+    color: var(--muted);
+    cursor: default;
+}
+
+.composer-row .victor-chip {
+    flex: none;
+    height: 26px;
+    padding: 0 9px;
+    font-size: 0.74rem;
+    background: none;
+    color: var(--muted);
+}
+
+@media (max-width: 379px) {
+    /* Keep Victor and the send controls whole on the narrowest phones; /plan remains available. */
+    .composer-row:has(.victor-chip) .plan-chip {
+        display: none;
+    }
+}
+
+@media (max-width: 699px) {
+    /* The idle Victor chip fits in the existing row; the model's thinking level gives it room. */
+    .composer-row:has(.victor-chip) .model-level {
+        display: none;
+    }
+}

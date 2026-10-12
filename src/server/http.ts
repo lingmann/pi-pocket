@@ -10,6 +10,7 @@ import { createApi } from "./http/api.ts";
 import { artifact } from "./http/artifacts.ts";
 import { hookRoute } from "./http/hook-routes.ts";
 import { serveApp, serveFile, VENDOR, WEB } from "./http/assets.ts";
+import { serveVictorAssets } from "./http/victor-assets.ts";
 import { type HttpOptions, json } from "./http/io.ts";
 import { join as joinPage, login, sharePage } from "./http/sign-in.ts";
 
@@ -51,6 +52,10 @@ export function createHandler(options: HttpOptions) {
                     auth.user(request),
                     url.searchParams,
                 );
+            }
+
+            if (parts[0] === "victor-assets") {
+                return serveVictorAssets(request, response, path);
             }
 
             if (parts[0] === "vendor" && parts[1] !== undefined && VENDOR[parts[1]] !== undefined) {

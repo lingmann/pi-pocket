@@ -18,7 +18,8 @@ import {
 import { startEdgeBack, startSwipes } from "./gestures.js";
 import { Splash } from "./home.js";
 import { Launcher } from "./launcher.js";
-import { registerWorker, updateBadge } from "./notify.js";
+import { updateBadge } from "./notify.js";
+import { registerWorker } from "./service-worker.js";
 import {
     PEEK_WIDE,
     PeekHost,
