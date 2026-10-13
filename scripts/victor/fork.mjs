@@ -138,15 +138,13 @@ function remoteRef(url, name) {
     return output ? output.split(/\s+/)[0] : "";
 }
 
-function fetchMain(remote) {
+function fetchMain(remote, capture = false) {
     // Do not depend on custom fetch mappings or advance any local branch.
-    run("git", [
-        "fetch",
-        "--no-tags",
-        "--refmap=",
-        remote,
-        `refs/heads/main:refs/remotes/${remote}/main`,
-    ]);
+    run(
+        "git",
+        ["fetch", "--no-tags", "--refmap=", remote, `refs/heads/main:refs/remotes/${remote}/main`],
+        capture,
+    );
 
     return ref(`refs/remotes/${remote}/main`);
 }
@@ -496,14 +494,81 @@ async function release(version) {
 
 function status() {
     process.env.GIT_PAGER = "cat";
+    process.env.GIT_OPTIONAL_LOCKS = "0";
 
-    run("git", ["status", "--short", "--branch"]);
-    run("git", ["branch", "-vv"]);
-    run("git", ["remote", "-v"]);
+    const color = process.stdout.isTTY && !Object.hasOwn(process.env, "NO_COLOR");
+    const paint = (code, text) => (color ? `\x1b[${code}m${text}\x1b[0m` : text);
+    const heading = (text, code = 1) => console.log(`\n${paint(code, text)}`);
+    const lines = (text) => (text ? text.split("\n") : []);
+    const upstream = "refs/remotes/upstream/main";
+    const history = ["refs/remotes/origin/main", "refs/heads/main"].find((name) =>
+        gitOK("show-ref", "--verify", "--quiet", name),
+    );
+    const historyName =
+        history === "refs/remotes/origin/main"
+            ? "origin/main (cached fork ref)"
+            : "main (origin/main unavailable)";
+    let fetched = false;
 
-    const history = gitOK("show-ref", "--verify", "--quiet", "refs/remotes/origin/main")
-        ? "refs/remotes/origin/main"
-        : "refs/heads/main";
+    try {
+        fetchMain("upstream", true);
+        fetched = true;
+        console.log("pi-pocket · upstream/main fetched just now");
+    } catch (error) {
+        console.log(paint(33, "WARNING · upstream fetch failed — showing cached refs"));
+        console.log(`  ${error.message}`);
+    }
+
+    const hasUpstream = gitOK("show-ref", "--verify", "--quiet", upstream);
+    const log = (...args) => lines(git("log", "--first-parent", "--format=%H", ...args));
+    const isUpstream = (hash) =>
+        hasUpstream && gitOK("merge-base", "--is-ancestor", hash, upstream);
+    const show = (hash, source) =>
+        run("git", [
+            "show",
+            "--no-patch",
+            `--color=${color ? "always" : "never"}`,
+            "--decorate=short",
+            "--decorate-refs=refs/tags/*",
+            `--format=  %C(dim)%h%C(reset)  %C(${source === "upstream" ? "cyan" : source === "fork" ? "magenta" : "dim"})${source.padEnd(10)}%C(reset)%s%C(yellow)%d%C(reset)`,
+            hash,
+        ]);
+
+    if (history && hasUpstream) {
+        const incoming = log(upstream, "--not", history);
+
+        heading(
+            `UPSTREAM AHEAD · ${incoming.length} update${incoming.length === 1 ? "" : "s"}${fetched ? " not in fork main" : " in cached upstream/main"}`,
+            36,
+        );
+        console.log(`  upstream/main → ${historyName}`);
+
+        if (incoming.length) {
+            console.log();
+        }
+
+        for (const hash of incoming) {
+            show(hash, "upstream");
+        }
+
+        if (gitOK("merge-base", history, upstream)) {
+            const boundary = git("merge-base", history, upstream);
+            const tag = git("tag", "--points-at", boundary);
+
+            console.log(
+                `\n  ── Already included through ${boundary.slice(0, 7)}${tag ? ` · ${lines(tag).join(", ")}` : ""} ──`,
+            );
+        } else {
+            console.log("  No common ancestor with upstream/main.");
+        }
+    } else {
+        heading("UPSTREAM AHEAD · unavailable", 33);
+        console.log(
+            `  ${!hasUpstream ? "No cached upstream/main." : "No fork-main ref available."}`,
+        );
+    }
+
+    heading(`RECENT FORK HISTORY · ${history ? historyName : "unavailable"}`, 35);
     const latest = git(
         "for-each-ref",
         "--sort=-creatordate",
@@ -512,10 +577,90 @@ function status() {
         "refs/tags/victor/",
     );
 
-    console.log(
-        `\nLatest local release tag: ${latest || "(none)"}\nFork main first-parent history (${history}; no fetch):`,
-    );
-    run("git", ["log", "--first-parent", "--oneline", "--decorate", "-12", history]);
+    console.log(`  Latest local fork release: ${latest || "none"}`);
+
+    if (history) {
+        console.log();
+    }
+
+    if (history && !hasUpstream) {
+        console.log("  Upstream classification and imported history unavailable.\n");
+    }
+
+    const shown = new Set();
+
+    const entry = (hash) => {
+        if (shown.size < 12 && !shown.has(hash)) {
+            show(hash, !hasUpstream ? "unknown" : isUpstream(hash) ? "upstream" : "fork");
+            shown.add(hash);
+        }
+    };
+
+    if (history) {
+        for (const hash of log("-12", history)) {
+            entry(hash);
+
+            if (shown.size >= 12) {
+                break;
+            }
+
+            // Expand imported upstream history beneath its fork merge, not by commit date.
+            if (hasUpstream && !isUpstream(hash) && gitOK("rev-parse", "--verify", `${hash}^2`)) {
+                for (const imported of log(upstream, "--not", `${hash}^1`)) {
+                    if (gitOK("merge-base", "--is-ancestor", imported, hash)) {
+                        entry(imported);
+                    }
+
+                    if (shown.size >= 12) {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    const branch = git("branch", "--show-current") || "HEAD detached";
+
+    heading(`LOCAL CHANGES · ${branch}`);
+
+    if (
+        [
+            "MERGE_HEAD",
+            "rebase-merge",
+            "rebase-apply",
+            "CHERRY_PICK_HEAD",
+            "REVERT_HEAD",
+            "sequencer",
+            "BISECT_LOG",
+        ].some((name) => existsSync(git("rev-parse", "--git-path", name)))
+    ) {
+        console.log("  Git operation in progress; run git status for details.");
+    }
+
+    let changed = false;
+
+    for (const [title, args] of [
+        ["Staged · git diff --cached --stat", ["--cached"]],
+        ["Unstaged · git diff --stat", []],
+    ]) {
+        if (!gitOK("diff", ...args, "--quiet")) {
+            changed = true;
+            heading(title);
+            run("git", ["diff", ...args, `--color=${color ? "always" : "never"}`, "--stat"]);
+        }
+    }
+
+    const untrackedArgs = ["ls-files", "--others", "--exclude-standard"];
+
+    if (git(...untrackedArgs)) {
+        changed = true;
+        heading("Untracked");
+        run("git", untrackedArgs);
+    }
+
+    if (!changed) {
+        console.log("  Working tree clean");
+    }
 }
 
 try {

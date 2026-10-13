@@ -403,33 +403,45 @@ function assertNoPublish(calls: string[][]) {
     );
 }
 
-test("status is read-only on dirty detached HEAD, with origin first-parent history and local fallback", (t) => {
+test("status fetches upstream without changing dirty detached HEAD, with origin history and local fallback", (t) => {
     const f = fixture(t);
 
     f.git("tag", "-a", "victor/v0.1.0", "-m", "local release");
     f.git("switch", "--detach");
     f.put("work.txt", "dirty\n");
-    const before = f.snapshot();
+    const before = f.protectedState();
+    const worktree = f.git("status", "--porcelain=v1");
     const result = f.run("status", undefined, "");
 
     success(result);
     assert.match(result.output, /work\.txt/);
     assert.match(result.output, /victor\/v0\.1\.0/);
     assert.match(result.output, /fork change/);
-    assert.deepEqual(f.snapshot(), before);
+    assert.match(result.output, /UPSTREAM AHEAD/);
+    assert.match(result.output, /RECENT FORK HISTORY/);
+    assert.match(result.output, /LOCAL CHANGES/);
+    assert.match(result.output, /HEAD detached/);
+    assert.deepEqual(f.protectedState(), before);
+    assert.equal(f.git("status", "--porcelain=v1"), worktree);
     f.git("update-ref", "-d", "refs/remotes/origin/main");
     success(f.run("status", undefined, ""));
     const calls = f.gitCalls();
     const logs = calls.filter((args) => args.includes("log"));
 
-    assert.equal(logs.length, 2);
     assert.ok(logs.every((args) => args.includes("--first-parent")));
-    assert.ok(logs[0]!.some((arg) => /^(refs\/remotes\/)?origin\/main$/.test(arg)));
-    assert.ok(logs[1]!.some((arg) => /^(refs\/heads\/)?main$/.test(arg)));
-    assert.equal(
-        calls.some((args) => args.includes("fetch")),
-        false,
-    );
+    const histories = logs.filter((args) => args.includes("-12"));
+
+    assert.equal(histories.length, 2);
+    assert.ok(histories[0]!.includes("refs/remotes/origin/main"));
+    assert.ok(histories[1]!.includes("refs/heads/main"));
+    const fetches = calls.filter((args) => args.includes("fetch"));
+
+    assert.equal(fetches.length, 2);
+
+    for (const fetch of fetches) {
+        assertFetches([fetch], ["upstream"]);
+    }
+
     assertNoPublish(calls);
 });
 
