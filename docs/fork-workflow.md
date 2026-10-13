@@ -38,7 +38,7 @@ Use a **development checkout, never the checkout serving Pi Pocket**. Install de
 
 | Command                            | Effect                                                                                                |
 | ---------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `just status`                      | Show worktree/tracking state, first-parent fork-main history, and latest local release tag. |
+| `just repo-status`                  | Fetch upstream main; show incoming updates, recent fork history, and staged/unstaged/untracked changes. |
 | `just feature voice-fix`           | Fetch fork main and create `$USER/voice-fix` from it.                                                 |
 | `just pr "fix voice playback"`     | Push the current branch and open PR with prefix: `fork: fix voice playback`. |
 | `just check`                       | Run TypeScript and focused Victor/shared/tooling tests.                                               |

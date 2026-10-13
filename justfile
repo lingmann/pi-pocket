@@ -34,10 +34,10 @@ tailscale-stop:
 tailscale-status:
     "$TAILSCALE_BIN" serve status
 
-# Show working-tree/tracking status, first-parent fork-main history, and local release tags; no fetch.
+# Fetch upstream; show incoming updates, recent fork history, and local changes.
 [group('repo')]
-status:
-    node scripts/victor/fork.mjs status
+repo-status:
+    @node scripts/victor/fork.mjs status
 
 # Run TypeScript and focused Victor/shared tests; no formatting or Git changes.
 [group('repo')]
