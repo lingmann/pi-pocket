@@ -21,6 +21,13 @@ flowchart TD
 
 Arrows mean **parent → child**; thick arrows trace main's first-parent review path. The tag line is a reference, not ancestry.
 
+## Commit titles on fork main
+
+- **`fork: <description>`** for our features, fixes, docs, and tooling.
+- **`upstream: merge upstream/main (<SHA>)`** for upstream-update PRs. The SHA identifies the actual imported commit, not the update branch's version label.
+
+These are PR titles, and they become the subjects of the squash/merge commits on main. Individual feature-branch commits need no prefix; `just pr` supplies the title. `Fork checks` requires the prefix that matches the head branch (`sync/upstream-*` requires `upstream:`, all other branches `fork:`) and reruns when a title is edited. Reserve `sync/upstream-*` for upstream updates, and keep the prefixed subject when merging: the check enforces the prefix, not the merge method.
+
 ## Before using mutating recipes
 
 Use a **development checkout, never the checkout serving Pi Pocket**. Install dependencies with `npm ci`; commit changes and finish any Git operation. Don't run concurrent Git operations.
@@ -29,25 +36,28 @@ Use a **development checkout, never the checkout serving Pi Pocket**. Install de
 
 ## Daily use
 
-| Command                        | Effect                                                                                                                          |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| `just status`                  | Show worktree/tracking state, first-parent fork-main history, and latest local release tag. No fetch.                           |
-| `just check`                   | Run TypeScript and focused Victor/shared/tooling tests.                                                                         |
-| `just upstream-update v0.13.3` | Fetch both mains; confirm; create `sync/upstream-v0.13.3` from `origin/main` and merge `upstream/main`. No push.                |
-| `just release 0.1.0`           | Require clean main matching freshly fetched origin/main; confirm, check, annotate and push only `victor/v0.1.0`. No deployment. |
+| Command                            | Effect                                                                                                |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `just status`                      | Show worktree/tracking state, first-parent fork-main history, and latest local release tag. |
+| `just feature voice-fix`           | Fetch fork main and create `$USER/voice-fix` from it.                                                 |
+| `just pr "fix voice playback"`     | Push the current branch and open PR with prefix: `fork: fix voice playback`. |
+| `just check`                       | Run TypeScript and focused Victor/shared/tooling tests.                                               |
+| `just upstream-update v0.13.3`     | Fetch both mains; create `sync/upstream-v0.13.3` from `origin/main` and merge `upstream/main`.        |
+| `just release 0.1.0`               | Tag and push only `victor/v0.1.0`, requiring main to match freshly fetched `origin/main`.             |
 
-The update name is a branch label, **not a version pin**; updates always merge upstream/main.
+Start features with `just feature <slug>` before editing. It creates `$USER/<slug>` from freshly fetched `origin/main`, leaving local `main` unchanged. Override the namespace with, for example, `USER=alice just feature voice-fix`.
 
-Start features from updated fork main. Authors may tidy their own branches, not rewrite another developer's shared work.
+`just pr "<description>"` publishes the branch and opens the PR. On an upstream-update branch, omit the description.
 
-After committing and checking either kind of branch:
+`just pr` requires an authenticated GitHub CLI (`gh auth login`), a clean non-main branch with at least one commit beyond `origin/main`, and `origin` fetch/push URLs pointing to `lingmann/pi-pocket`. It fetches `origin/main`, requires the branch to include it, and never force-pushes, merges, or publishes tags.
 
-```sh
-git push -u origin HEAD
-gh pr create --repo lingmann/pi-pocket --base main
-```
+Rerunning is safe: if the fork already has an open PR for the branch, `just pr` prints its URL without pushing or changing the title. After the first push, add reviewed commits with `git push --no-follow-tags origin HEAD` and edit the title on GitHub. If the push succeeded but PR creation failed, rerun `just pr`; it checks for an existing PR first. An upstream-update title comes from the first import merge's second parent, so later commits and a moving `upstream/main` do not change it; a description becomes the PR body.
 
-Choose the merge method above. Refresh local main with `git pull --ff-only` before releasing; use a fresh `X.Y.Z` version.
+You can still open PRs manually; give them the prefix above and target the fork's `main`.
+
+Authors may tidy their own branches, not rewrite another developer's shared work.
+
+Release from `main` after `git pull --ff-only` and confirmation that it has passed the required GitHub checks and any manual release checks; `just release 0.1.0` annotates and pushes only the new `victor/vX.Y.Z` tag after its safety guards and never deploys.
 
 ## Release versioning
 
@@ -57,13 +67,3 @@ For example, starting from `victor/v0.1.0` based on upstream `v0.13.2`:
 
 - A fork-only bug fix becomes `victor/v0.1.1`, still based on upstream `v0.13.2`.
 - Adopting new capabilities from upstream `v0.13.3` could become `victor/v0.2.0`. A fixes-only upstream update can be a patch release instead.
-
-## Checks and recovery
-
-`just check` is a baseline. The `Fork checks` GitHub Actions job runs the same checks on PRs to `main` and pushes to `main`, using Node 24 and Chrome. It fails if Chrome is unavailable, rather than silently skipping browser tests. Add [shared/upstream coverage](victor.md#focused-test-coverage) and manual device checks as needed. [Known failures](../TEST_ISSUES.md) still fail the gate.
-
-GitHub requires PRs and passing, up-to-date `Fork checks` before merging, including for administrators. Non-admins need one approving review; administrators may bypass that review when merging through a PR. Approval is enforced by a separate ruleset so this exemption does not bypass the other branch protections. Authors still cannot approve their own PRs. Repository settings allow squash and merge commits, disable rebase merging, and protect `main` from force-pushes and deletion without requiring linear history. Published tags cannot be updated or deleted; new tags can still be created. These GitHub settings are configured separately, not by the recipes.
-
-For update conflicts, resolve and stage files, then `git merge --continue`; cancel with `git merge --abort`. The update branch and fetched refs remain.
-
-A failed tag push preserves the local tag and prints an explicit retry command. Retry that push, not `just release`; never force an existing remote tag.

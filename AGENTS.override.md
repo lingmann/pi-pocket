@@ -6,6 +6,10 @@ Read the adjacent [AGENTS.md](AGENTS.md). Follow its upstream guidance except wh
 
 Before Victor work, read [docs/victor.md](docs/victor.md). Its source map distinguishes Victor responsibilities from shared Pi Pocket dependencies and identifies focused test coverage. Keep that map current rather than duplicating it here.
 
+Keep all Victor and fork-maintenance scripts under `scripts/victor/` so they remain clearly separate from upstream tooling.
+
+Keep Victor fork-specific tests directly under `test/` and name them `victor-<behavior>.test.ts`, including fork-maintenance tests (for example, `victor-fork-workflow.test.ts`). This keeps them distinct from upstream tests and included in automatic Victor test discovery.
+
 ## Validation
 
 This policy replaces blanket validation and repository-wide formatting requirements in `AGENTS.md`, `docs/self-editing.md`, and `docs/architecture.md`, including full-suite requirements before completion or a restart. All other upstream safety rules still apply, including protecting live data and asking before a restart.

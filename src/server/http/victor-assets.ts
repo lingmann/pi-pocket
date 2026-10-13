@@ -248,7 +248,7 @@ export function createVictorAssetHandler(root: string = APP_ROOT) {
         } catch {
             throw new HttpError(
                 503,
-                "Victor assets are not prepared. Run node scripts/prepare-victor-assets.mjs, then retry.",
+                "Victor assets are not prepared. Run node scripts/victor/prepare-victor-assets.mjs, then retry.",
             );
         }
 

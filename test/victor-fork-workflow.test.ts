@@ -1,21 +1,39 @@
 // Real Git integration: disposable file-only remotes, isolated configuration, no app or branchless.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+    chmodSync,
+    existsSync,
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    rmSync,
+    writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 
-const helper = fileURLToPath(new URL("../scripts/fork.mjs", import.meta.url));
+const helper = fileURLToPath(new URL("../scripts/victor/fork.mjs", import.meta.url));
 const updateBranch = "sync/upstream-next";
+const featureBranch = "fixture/next";
 const tag = "victor/v1.2.3";
 const tagRef = `refs/tags/${tag}`;
-const mutations = ["upstream-update", "release"];
+const existingForkPR = JSON.stringify([
+    {
+        url: "existing PR",
+        baseRefName: "main",
+        headRepositoryOwner: { login: "lingmann" },
+        headRepository: { name: "pi-pocket" },
+    },
+]);
+const mutations = ["feature", "upstream-update", "release"];
 const focusedTests = [
     "victor-alpha.test.ts",
     "victor-newly-added.test.ts",
-    "fork-workflow.test.ts",
+    "victor-fork-workflow.test.ts",
+    "victor-fork-pr-title.test.ts",
     "service-worker.test.ts",
     "notify.test.ts",
     "voice.test.ts",
@@ -51,6 +69,7 @@ function fixture(t: TestContext) {
     const env: NodeJS.ProcessEnv = {
         PATH: `${dirname(process.execPath)}:${process.env.PATH ?? "/usr/bin:/bin"}`,
         HOME: home,
+        USER: "fixture",
         XDG_CONFIG_HOME: home,
         TMPDIR: root,
         LANG: "C",
@@ -222,6 +241,61 @@ function fixture(t: TestContext) {
             .map((event) => event.argv!);
     }
 
+    function setupPR() {
+        const bin = join(root, "bin");
+        const realGit = spawnSync("which", ["git"], { encoding: "utf8" }).stdout.trim();
+        const ghRecord = join(root, "gh.jsonl");
+
+        mkdirSync(bin);
+        // Only presentation is mocked. All Git mutations still use file-only remotes.
+        writeFileSync(
+            join(bin, "git"),
+            `#!${process.execPath}\n
+import { spawnSync } from 'node:child_process';
+const args = process.argv.slice(2);
+const r = spawnSync(${JSON.stringify(realGit)}, args, { encoding: 'utf8' });
+let out = r.stdout || '';
+if (args[0] === 'remote' && args[1] === 'get-url' && args.at(-1) === 'origin') {
+    out = out.replaceAll(${JSON.stringify(origin)}, 'https://github.com/lingmann/pi-pocket.git');
+}
+process.stdout.write(out); process.stderr.write(r.stderr || ''); process.exit(r.status ?? 1);
+`,
+        );
+        writeFileSync(
+            join(bin, "gh"),
+            `#!${process.execPath}\n
+import { appendFileSync, readFileSync, existsSync } from 'node:fs';
+const args = process.argv.slice(2);
+if (args[0] === 'pr' && args[args.indexOf('--repo') + 1] !== 'github.com/lingmann/pi-pocket') throw new Error('GitHub host must be explicit');
+appendFileSync(${JSON.stringify(ghRecord)}, JSON.stringify(args) + '\\n');
+if (args[0] === 'auth' && process.env.FORK_TEST_AUTH_FAIL) process.exit(1);
+if (args[1] === 'list') {
+    if (args[args.indexOf('--head') + 1].includes(':')) throw new Error('gh pr list does not accept owner:branch');
+    if (process.env.FORK_TEST_LIST_FAIL) process.exit(1);
+    console.log(process.env.FORK_TEST_EXISTING_PR || '[]');
+}
+if (args[1] === 'create') {
+    if (process.env.FORK_TEST_CREATE_FAIL) process.exit(1);
+    console.log('https://github.com/lingmann/pi-pocket/pull/123');
+}
+`,
+        );
+
+        for (const name of ["git", "gh"]) {
+            chmodSync(join(bin, name), 0o755);
+        }
+
+        env.PATH = `${bin}:${env.PATH}`;
+
+        return () =>
+            existsSync(ghRecord)
+                ? readFileSync(ghRecord, "utf8")
+                      .trim()
+                      .split("\n")
+                      .map((line) => JSON.parse(line) as string[])
+                : [];
+    }
+
     function assertChecks(checked = head()) {
         assert.deepEqual(
             readFileSync(record, "utf8").trim().split("\n").sort(),
@@ -243,19 +317,11 @@ function fixture(t: TestContext) {
     put(
         "check.mjs",
         `
-import { appendFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
 appendFileSync(process.env.FORK_TEST_RECORD, 'check:' + git('rev-parse', 'HEAD') + '\\n');
 if (process.env.FORK_TEST_FAIL_CHECK) process.exit(1);
-if (process.env.FORK_TEST_CHANGE === 'dirty') writeFileSync('unexpected.txt', 'changed during check');
-if (process.env.FORK_TEST_CHANGE === 'head') git('commit', '--allow-empty', '-m', 'changed during check');
-if (process.env.FORK_TEST_CHANGE === 'branch') git('switch', '-c', 'feature/changed');
-if (process.env.FORK_TEST_CHANGE === 'pushurl') git('remote', 'set-url', '--push', 'origin', process.env.FORK_TEST_URL);
-if (process.env.FORK_TEST_CHANGE === 'fetchurl') git('remote', 'set-url', 'origin', process.env.FORK_TEST_URL);
-if (process.env.FORK_TEST_CHANGE === 'tracking') git('config', 'branch.main.remote', 'upstream');
-if (process.env.FORK_TEST_CHANGE === 'remote-tag') git('push', process.env.FORK_TEST_REMOTE, process.env.FORK_TEST_BASE + ':refs/tags/victor/v1.2.3');
-if (process.env.FORK_TEST_CHANGE === 'remote-main') git('--git-dir=' + process.env.FORK_TEST_REMOTE, 'update-ref', 'refs/heads/main', process.env.FORK_TEST_BASE);
 `,
     );
 
@@ -305,6 +371,7 @@ if (process.env.FORK_TEST_FAIL_TEST === ${JSON.stringify(name)}) throw new Error
         bare,
         advanceUpstream,
         gitCalls,
+        setupPR,
         assertChecks,
         assertPublishedTag,
     };
@@ -399,8 +466,24 @@ test("invalid commands, argument counts, names and versions never mutate refs", 
         "a@{b",
         "../bad",
     ]) {
-        failure(f.run("upstream-update", name));
+        for (const action of ["feature", "upstream-update"]) {
+            failure(f.run(action, name));
+        }
     }
+
+    for (const user of [undefined, "", "../bad", "a/b", "a b", "a..b", "a.lock"]) {
+        if (user === undefined) {
+            delete f.env.USER;
+        } else {
+            f.env.USER = user;
+        }
+
+        failure(f.run("feature", "next"));
+    }
+
+    f.env.USER = "sync";
+    failure(f.run("feature", "upstream-next"));
+    f.env.USER = "fixture";
 
     for (const version of [
         undefined,
@@ -415,6 +498,7 @@ test("invalid commands, argument counts, names and versions never mutate refs", 
         failure(f.run("release", version));
     }
 
+    failure(f.run("feature", "next", "yes\n", ["extra"]));
     failure(f.run("upstream-update", "next", "yes\n", ["extra"]));
     failure(f.run("release", "1.2.3", "yes\n", ["extra"]));
     assert.deepEqual(f.snapshot(), before);
@@ -422,7 +506,7 @@ test("invalid commands, argument counts, names and versions never mutate refs", 
     assertNoPublish(f.gitCalls());
 });
 
-test("both mutations reject dirty, detached and unfinished states before fetching", async (t) => {
+test("mutations reject dirty, detached and unfinished states before fetching", async (t) => {
     const states = [
         "detached",
         "unstaged",
@@ -548,6 +632,35 @@ test("origin has one fetch and push URL, each distinct from upstream", async (t)
     }
 });
 
+test("feature branches use USER and fetched fork main, not stale main or unrelated HEAD", (t) => {
+    const f = fixture(t);
+
+    f.git("switch", "-c", "feature/unrelated");
+    f.put("unrelated.txt", "not part of the new feature\n");
+    const unrelated = f.commit("unrelated local feature");
+
+    f.git("update-ref", "refs/heads/main", f.base);
+    f.git("update-ref", "refs/remotes/origin/main", f.base);
+    f.git("config", "branch.autoSetupMerge", "always");
+    f.git("config", "--add", "remote.origin.fetch", "refs/heads/main:refs/heads/main");
+    f.gitAt(f.origin, "tag", "remote-only", "main");
+    const before = { origin: f.refs(f.origin), upstream: f.refs(f.upstream) };
+    const result = f.run("feature", "next");
+
+    success(result);
+    assert.equal(f.git("branch", "--show-current"), featureBranch);
+    assert.equal(f.head(), f.fork);
+    assert.equal(f.git("rev-parse", "main"), f.base);
+    assert.equal(f.git("rev-parse", "feature/unrelated"), unrelated);
+    assert.equal(f.git("for-each-ref", "--format=%(upstream)", `refs/heads/${featureBranch}`), "");
+    assert.equal(f.refs(f.repo, "refs/tags"), "");
+    assert.equal(existsSync(join(f.repo, "unrelated.txt")), false);
+    assert.deepEqual({ origin: f.refs(f.origin), upstream: f.refs(f.upstream) }, before);
+    assert.ok(result.output.includes(featureBranch), result.output);
+    assertFetches(f.gitCalls(), ["origin"]);
+    assertNoPublish(f.gitCalls());
+});
+
 test("upstream update merges fetched tips, retaining fork history despite stale main and another HEAD", (t) => {
     const f = fixture(t);
     const upstreamTip = f.advanceUpstream();
@@ -650,6 +763,7 @@ test("even a fast-forwardable upstream update has two parents", (t) => {
 
 test("failed main fetches stop before confirmation, checkout or publication", async (t) => {
     for (const [action, remote] of [
+        ["feature", "origin"],
         ["upstream-update", "origin"],
         ["upstream-update", "upstream"],
         ["release", "origin"],
@@ -684,26 +798,33 @@ test("already-integrated upstream is a no-op without confirmation", (t) => {
     assertNoPublish(f.gitCalls());
 });
 
-test("duplicate update branches are refused locally and at the actual push endpoint", (t) => {
-    const f = fixture(t);
+test("duplicate branches are refused locally and at the actual push endpoint", async (t) => {
+    for (const [action, branch] of [
+        ["feature", featureBranch],
+        ["upstream-update", updateBranch],
+    ] as const) {
+        await t.test(action, (t) => {
+            const f = fixture(t);
 
-    f.advanceUpstream();
-    f.git("branch", updateBranch);
-    let before = f.protectedState();
+            f.advanceUpstream();
+            f.git("branch", branch);
+            let before = f.protectedState();
 
-    failure(f.run("upstream-update", "next"));
-    assert.deepEqual(f.protectedState(), before);
-    f.git("branch", "-D", updateBranch);
-    const destination = f.bare("push-only");
+            failure(f.run(action, "next"));
+            assert.deepEqual(f.protectedState(), before);
+            f.git("branch", "-D", branch);
+            const destination = f.bare("push-only");
 
-    f.git("push", destination, `HEAD:refs/heads/${updateBranch}`);
-    f.git("remote", "set-url", "--push", "origin", destination);
-    before = f.protectedState();
-    const remoteBefore = f.refs(destination);
+            f.git("push", destination, `HEAD:refs/heads/${branch}`);
+            f.git("remote", "set-url", "--push", "origin", destination);
+            before = f.protectedState();
+            const remoteBefore = f.refs(destination);
 
-    failure(f.run("upstream-update", "next"));
-    assert.deepEqual(f.protectedState(), before);
-    assert.equal(f.refs(destination), remoteBefore);
+            failure(f.run(action, "next"));
+            assert.deepEqual(f.protectedState(), before);
+            assert.equal(f.refs(destination), remoteBefore);
+        });
+    }
 });
 
 test("cancellation after fetching requires literal yes and creates no branch, tag or commit", (t) => {
@@ -726,7 +847,7 @@ test("cancellation after fetching requires literal yes and creates no branch, ta
     assertNoPublish(f.gitCalls());
 });
 
-test("prompt-time checkout, URL and tracking drift is rejected by both mutations", async (t) => {
+test("prompt-time checkout, URL and tracking drift is rejected by mutations", async (t) => {
     for (const action of mutations) {
         for (const change of [
             "branch",
@@ -772,22 +893,35 @@ test("prompt-time checkout, URL and tracking drift is rejected by both mutations
                 assert.equal(f.refs(other), "");
                 assert.equal(f.refs(f.repo, "refs/tags"), "");
                 assert.equal(f.refs(f.repo, `refs/heads/${updateBranch}`), "");
+                assert.equal(f.refs(f.repo, `refs/heads/${featureBranch}`), "");
                 assert.equal(existsSync(f.record), false);
             });
         }
     }
 });
 
-test("upstream update pins fetched OIDs even if tracking refs move during confirmation", async (t) => {
-    const f = fixture(t);
-    const upstreamTip = f.advanceUpstream();
-    const result = await f.duringPrompt("upstream-update", "next", () => {
-        f.git("update-ref", "refs/remotes/origin/main", f.base);
-        f.git("update-ref", "refs/remotes/upstream/main", f.base);
-    });
+test("branch creation pins fetched OIDs even if tracking refs move during confirmation", async (t) => {
+    for (const action of ["feature", "upstream-update"]) {
+        await t.test(action, async (t) => {
+            const f = fixture(t);
+            const upstreamTip = f.advanceUpstream();
+            const result = await f.duringPrompt(action, "next", () => {
+                f.git("update-ref", "refs/remotes/origin/main", f.base);
+                f.git("update-ref", "refs/remotes/upstream/main", f.base);
+            });
 
-    success(result);
-    assert.deepEqual(f.git("show", "-s", "--format=%P", "HEAD").split(" "), [f.fork, upstreamTip]);
+            success(result);
+
+            if (action === "feature") {
+                assert.equal(f.head(), f.fork);
+            } else {
+                assert.deepEqual(f.git("show", "-s", "--format=%P", "HEAD").split(" "), [
+                    f.fork,
+                    upstreamTip,
+                ]);
+            }
+        });
+    }
 });
 
 test("conflicts stay on the update branch for ordinary merge continue or abort", async (t) => {
@@ -827,7 +961,7 @@ test("conflicts stay on the update branch for ordinary merge continue or abort",
     }
 });
 
-test("release fetches main even without its tracking ref and publishes only the checked annotated tag", (t) => {
+test("release fetches main even without its tracking ref and publishes only the annotated tag without local checks", (t) => {
     const f = fixture(t);
     const before = f.refs(f.origin, "refs/heads");
 
@@ -844,14 +978,14 @@ test("release fetches main even without its tracking ref and publishes only the 
     const result = f.run("release", "1.2.3");
 
     success(result);
-    f.assertChecks();
+    assert.equal(existsSync(f.record), false);
     f.assertPublishedTag();
     assert.ok(result.output.includes(f.fork), result.output);
     assert.ok(result.output.includes(f.origin), result.output);
     const annotation = f.git("for-each-ref", "--format=%(contents)", tagRef);
 
     assert.ok(annotation.includes(f.fork), annotation);
-    assert.match(annotation, /just check/);
+    assert.doesNotMatch(annotation, /Automated checks|just check/);
     assert.equal(f.refs(f.origin, "refs/heads"), before);
     assert.equal(f.gitAt(f.origin, "tag", "--list"), tag);
     const calls = f.gitCalls();
@@ -930,78 +1064,263 @@ test("local and actual push-endpoint duplicate versions are never replaced", (t)
     assert.equal(existsSync(f.record), false);
 });
 
-test("failed type checks or focused tests never create or publish a release tag", (t) => {
+test("release does not invoke type checks or focused tests even when their stand-ins would fail", (t) => {
     const f = fixture(t);
-    const before = f.protectedState();
 
     f.env.FORK_TEST_FAIL_CHECK = "1";
-    failure(f.run("release", "1.2.3"));
-    assert.equal(readFileSync(f.record, "utf8"), `check:${f.head()}\n`);
-    assert.deepEqual(f.protectedState(), before);
-    delete f.env.FORK_TEST_FAIL_CHECK;
     f.env.FORK_TEST_FAIL_TEST = "victor-newly-added.test.ts";
-    const result = f.run("release", "1.2.3");
-
-    failure(result);
-    assert.match(result.output, /fixture test failure/);
-    assert.deepEqual(f.protectedState(), before);
+    success(f.run("release", "1.2.3"));
+    assert.equal(existsSync(f.record), false);
+    f.assertPublishedTag();
 });
 
-test("release revalidates branch, HEAD, cleanliness, URLs and tracking after checks", async (t) => {
-    for (const change of ["branch", "head", "dirty", "pushurl", "fetchurl", "tracking"]) {
-        await t.test(change, (t) => {
-            const f = fixture(t);
-            const other = f.bare("other");
-            const before = f.refs(f.origin);
-
-            f.env.FORK_TEST_URL = other;
-            f.env.FORK_TEST_CHANGE = change;
-            failure(f.run("release", "1.2.3"));
-            assert.ok(readFileSync(f.record, "utf8").includes("victor-newly-added.test.ts"));
-            assert.equal(f.refs(f.repo, "refs/tags"), "");
-            assert.equal(f.refs(f.origin), before);
-            assert.equal(f.refs(other), "");
-        });
-    }
-});
-
-test("release freshly queries both fetch and push main after checks, not cached tracking refs", async (t) => {
+test("release freshly queries both fetch and push main after confirmation, not cached tracking refs", async (t) => {
     for (const changedRemote of ["fetch", "push"]) {
-        await t.test(changedRemote, (t) => {
+        await t.test(changedRemote, async (t) => {
             const f = fixture(t);
             const destination = f.bare("push-only");
 
             f.git("push", destination, "main:refs/heads/main");
             f.git("remote", "set-url", "--push", "origin", destination);
-            f.env.FORK_TEST_CHANGE = "remote-main";
-            f.env.FORK_TEST_REMOTE = changedRemote === "fetch" ? f.origin : destination;
-            f.env.FORK_TEST_BASE = f.base;
-            failure(f.run("release", "1.2.3"));
-            f.assertChecks();
+            const remote = changedRemote === "fetch" ? f.origin : destination;
+            const result = await f.duringPrompt("release", "1.2.3", () => {
+                f.gitAt(remote, "update-ref", "refs/heads/main", f.base);
+            });
+
+            failure(result);
+            assert.equal(existsSync(f.record), false);
             assert.equal(f.git("rev-parse", "origin/main"), f.fork);
             assert.equal(f.refs(f.repo, "refs/tags"), "");
             assert.equal(f.refs(f.origin, "refs/tags"), "");
             assert.equal(f.refs(destination, "refs/tags"), "");
-            assert.equal(f.gitAt(f.env.FORK_TEST_REMOTE, "rev-parse", "main"), f.base);
+            assert.equal(f.gitAt(remote, "rev-parse", "main"), f.base);
         });
     }
 });
 
-test("a remote tag race during checks cannot be overwritten by forced wildcard push rules", (t) => {
+test("a remote tag race during confirmation cannot be overwritten by forced wildcard push rules", async (t) => {
     const f = fixture(t);
     const before = f.refs(f.origin, "refs/heads");
 
     f.git("config", "remote.origin.push", "+refs/tags/*:refs/tags/*");
-    f.env.FORK_TEST_CHANGE = "remote-tag";
-    f.env.FORK_TEST_REMOTE = f.origin;
-    f.env.FORK_TEST_BASE = f.base;
-    const result = f.run("release", "1.2.3");
+    const result = await f.duringPrompt("release", "1.2.3", () => {
+        f.git("push", f.origin, `${f.base}:${tagRef}`);
+    });
 
     failure(result);
-    f.assertChecks();
+    assert.equal(existsSync(f.record), false);
     assert.equal(f.gitAt(f.origin, "rev-parse", tagRef), f.base);
     assert.equal(f.gitAt(f.origin, "tag", "--list"), tag);
     assert.equal(f.refs(f.origin, "refs/heads"), before);
+});
+
+test("PR publication pins only the feature branch and uses explicit fork metadata", (t) => {
+    const f = fixture(t);
+    const ghCalls = f.setupPR();
+
+    f.git("switch", "-c", "feature/voice");
+    f.git("commit", "--allow-empty", "-m", "voice fix");
+    f.git("config", "remote.origin.push", "+refs/heads/*:refs/heads/*");
+    f.git("config", "push.followTags", "true");
+    f.git("tag", "-a", "unrelated", "-m", "stay local");
+    const head = f.head();
+
+    f.env.FORK_TEST_EXISTING_PR = JSON.stringify([
+        {
+            url: "other owner's PR",
+            headRepositoryOwner: { login: "other" },
+            headRepository: { name: "pi-pocket" },
+        },
+    ]);
+    const result = f.run("pr", "fork: fix voice playback");
+
+    success(result);
+    assert.equal(f.gitAt(f.origin, "rev-parse", "refs/heads/feature/voice"), head);
+    assert.equal(f.gitAt(f.origin, "rev-parse", "main"), f.fork);
+    assert.equal(f.refs(f.origin, "refs/tags"), "");
+    assert.deepEqual(ghCalls().at(-1), [
+        "pr",
+        "create",
+        "--repo",
+        "github.com/lingmann/pi-pocket",
+        "--base",
+        "main",
+        "--head",
+        "lingmann:feature/voice",
+        "--title",
+        "fork: fix voice playback",
+        "--body",
+        "fix voice playback",
+    ]);
+    const pushes = f.gitCalls().filter((args) => args.includes("push"));
+
+    assert.equal(pushes.length, 1);
+    assert.deepEqual(pushes[0]!.slice(1), [
+        "push",
+        "--no-follow-tags",
+        "origin",
+        `${head}:refs/heads/feature/voice`,
+    ]);
+});
+
+test("upstream merge and PR titles use imported ancestry after later fixes and ref movement", (t) => {
+    const f = fixture(t);
+    const imported = f.advanceUpstream();
+
+    success(f.run("upstream-update", "next"));
+    assert.equal(
+        f.git("show", "-s", "--format=%s", "HEAD"),
+        `upstream: merge upstream/main (${imported})`,
+    );
+    f.git("commit", "--allow-empty", "-m", "later fix");
+    f.git("update-ref", "refs/remotes/upstream/main", f.base);
+    const ghCalls = f.setupPR();
+
+    success(f.run("pr", ""));
+    assert.ok(ghCalls().at(-1)!.includes(`upstream: merge upstream/main (${imported})`));
+});
+
+test("PR preflight and cancellation never publish", async (t) => {
+    for (const state of [
+        "main",
+        "dirty",
+        "detached",
+        "auth",
+        "list",
+        "existing",
+        "cancel",
+        "fetchurl",
+        "pushurl",
+        "mirror",
+        "no-import",
+        "empty-description",
+        "wrong-prefix",
+    ]) {
+        await t.test(state, (t) => {
+            const f = fixture(t);
+            const ghCalls = f.setupPR();
+
+            if (state !== "main") {
+                f.git("switch", "-c", state === "no-import" ? updateBranch : "feature/guard");
+                f.git("commit", "--allow-empty", "-m", "feature");
+            }
+
+            if (state === "dirty") {
+                f.put("unexpected.txt", "dirty");
+            }
+
+            if (state === "detached") {
+                f.git("checkout", "--detach");
+            }
+
+            if (state === "auth") {
+                f.env.FORK_TEST_AUTH_FAIL = "1";
+            }
+
+            if (state === "list") {
+                f.env.FORK_TEST_LIST_FAIL = "1";
+            }
+
+            if (state === "existing") {
+                f.env.FORK_TEST_EXISTING_PR = existingForkPR;
+            }
+
+            if (state === "mirror") {
+                f.git("config", "remote.origin.mirror", "true");
+            }
+
+            if (state === "fetchurl" || state === "pushurl") {
+                f.git(
+                    "remote",
+                    "set-url",
+                    ...(state === "pushurl" ? ["--push"] : []),
+                    "origin",
+                    "https://github.com/other/pi-pocket.git",
+                );
+            }
+
+            const before = f.protectedState();
+            const result = f.run(
+                "pr",
+                state === "empty-description"
+                    ? " "
+                    : state === "wrong-prefix"
+                      ? "upstream: fake import"
+                      : "guard",
+                state === "cancel" ? "no\n" : "yes\n",
+            );
+
+            if (state === "existing") {
+                success(result);
+            } else {
+                failure(result);
+            }
+
+            assert.deepEqual(f.protectedState(), before);
+            assertNoPublish(f.gitCalls());
+            assert.equal(
+                ghCalls().some((args) => args[1] === "create"),
+                false,
+            );
+        });
+    }
+});
+
+test("PR rejects prompt-time context drift before publishing", async (t) => {
+    for (const change of ["branch", "head", "dirty", "fetchurl", "pushurl", "tracking", "mirror"]) {
+        await t.test(change, async (t) => {
+            const f = fixture(t);
+
+            f.setupPR();
+            f.git("switch", "-c", "feature/guard");
+            f.git("commit", "--allow-empty", "-m", "feature");
+            const before = f.refs(f.origin);
+            const result = await f.duringPrompt("pr", "guard", () => {
+                if (change === "branch") {
+                    f.git("switch", "-c", "feature/changed");
+                } else if (change === "head") {
+                    f.git("commit", "--allow-empty", "-m", "changed");
+                } else if (change === "dirty") {
+                    f.put("unexpected.txt", "dirty");
+                } else if (change === "tracking") {
+                    f.git("config", "branch.main.remote", "upstream");
+                } else if (change === "mirror") {
+                    f.git("config", "remote.origin.mirror", "true");
+                } else {
+                    f.git(
+                        "remote",
+                        "set-url",
+                        ...(change === "pushurl" ? ["--push"] : []),
+                        "origin",
+                        "https://github.com/other/pi-pocket.git",
+                    );
+                }
+            });
+
+            failure(result);
+            assert.equal(f.refs(f.origin), before);
+            assertNoPublish(f.gitCalls());
+        });
+    }
+});
+
+test("a failed PR create preserves the published branch and retries without duplicates", (t) => {
+    const f = fixture(t);
+    const ghCalls = f.setupPR();
+
+    f.git("switch", "-c", "feature/retry");
+    f.git("commit", "--allow-empty", "-m", "feature");
+    f.env.FORK_TEST_CREATE_FAIL = "1";
+    const result = f.run("pr", "retry safely");
+
+    failure(result);
+    assert.match(result.output, /was pushed.*Retry just pr/s);
+    assert.equal(f.gitAt(f.origin, "rev-parse", "feature/retry"), f.head());
+    delete f.env.FORK_TEST_CREATE_FAIL;
+    f.env.FORK_TEST_EXISTING_PR = existingForkPR;
+    success(f.run("pr", "retry safely"));
+    assert.equal(ghCalls().filter((args) => args[1] === "create").length, 1);
+    assert.equal(f.gitCalls().filter((args) => args.includes("push")).length, 1);
 });
 
 test("failed tag publication preserves the annotated tag with an exact safe retry command", (t) => {

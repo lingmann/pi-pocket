@@ -185,7 +185,7 @@ function makeSpec(url: string): SourceSpec {
 
 async function fixture(t: TestContext) {
     const root = await mkdtemp(join(tmpdir(), "pocket-victor-assets-"));
-    const script = join(root, "scripts", "prepare-victor-assets.mjs");
+    const script = join(root, "scripts", "victor", "prepare-victor-assets.mjs");
     const cwd = join(root, "unrelated-working-directory");
     const directory = join(root, "vendor", "victor");
     const manifestPath = join(directory, "manifest.json");
@@ -219,7 +219,7 @@ async function fixture(t: TestContext) {
     });
     await mkdir(dirname(script), { recursive: true });
     await mkdir(cwd);
-    await copyFile(new URL("../scripts/prepare-victor-assets.mjs", import.meta.url), script);
+    await copyFile(new URL("../scripts/victor/prepare-victor-assets.mjs", import.meta.url), script);
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 
     const address = server.address();

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Shared-main fork operations. Publication changes tags only; branch changes go through PRs.
+// Shared-main fork operations. Branch changes reach main only through PRs.
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { createInterface } from "node:readline";
@@ -160,6 +160,34 @@ function availableBranch(ctx, branch) {
     }
 }
 
+async function feature(slug) {
+    const user = process.env.USER ?? "";
+    const branch = `${user}/${slug ?? ""}`;
+
+    if (
+        [user, slug ?? ""].some((part) => !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(part)) ||
+        branch.startsWith("sync/upstream-") ||
+        !gitOK("check-ref-format", `refs/heads/${branch}`)
+    ) {
+        throw new Error("Set USER to a valid namespace and supply a slug: just feature voice-fix");
+    }
+
+    const ctx = context();
+
+    availableBranch(ctx, branch);
+    const forkHead = fetchMain("origin");
+
+    await confirm(
+        `Create ${branch} from origin/main at ${forkHead}?\nFork: ${ctx.originURL}\nThis switches files. Use a development checkout, not a serving checkout. Nothing will be pushed.`,
+    );
+    unchanged(ctx);
+    availableBranch(ctx, branch);
+    run("git", ["switch", "--no-track", "-c", branch, forkHead]);
+    console.log(
+        'Make, review and test changes, then commit them and run just pr "description". Use Squash and merge for the PR.',
+    );
+}
+
 async function upstreamUpdate(name) {
     const branch = `sync/upstream-${name}`;
 
@@ -197,7 +225,7 @@ async function upstreamUpdate(name) {
             "--no-edit",
             "--no-squash",
             "-m",
-            `Merge upstream/main into ${branch}`,
+            upstreamTitle(upstreamHead),
             upstreamHead,
         ]);
     } catch (error) {
@@ -209,8 +237,176 @@ async function upstreamUpdate(name) {
     }
 
     console.log(
-        `Run just check, push ${branch}, and open a PR to the fork's main. Use Create a merge commit for this PR, never squash.`,
+        `Review and test the update separately, then run just pr to publish ${branch} and open a PR to the fork's main. Use Create a merge commit for this PR, never squash.`,
     );
+}
+
+const forkRepository = "github.com/lingmann/pi-pocket";
+const upstreamTitle = (sha) => `upstream: merge upstream/main (${sha})`;
+
+function publicationDestination(ctx) {
+    if (
+        [ctx.originURL, ctx.pushURL].some(
+            (url) => repositoryURL(url).toLowerCase() !== `https://${forkRepository}`,
+        )
+    ) {
+        throw new Error(
+            `origin fetch and push URLs must both identify GitHub repository ${forkRepository}.`,
+        );
+    }
+
+    if (git("config", "--bool", "--default", "false", "--get", "remote.origin.mirror") === "true") {
+        throw new Error("Disable remote.origin.mirror before publishing.");
+    }
+}
+
+function prTitle(ctx, description, base) {
+    if (!ctx.branch.startsWith("sync/upstream-")) {
+        return `fork: ${description}`;
+    }
+
+    // The oldest first-parent merge on this branch records the imported commit.
+    // Later fixes (and a moving upstream/main) must not change its identity.
+    const merges = git(
+        "rev-list",
+        "--first-parent",
+        "--merges",
+        "--reverse",
+        `${base}..${ctx.head}`,
+    )
+        .split("\n")
+        .filter(Boolean);
+    const parents = merges.length ? git("show", "-s", "--format=%P", merges[0]).split(" ") : [];
+
+    if (parents.length !== 2 || !gitOK("merge-base", "--is-ancestor", parents[0], base)) {
+        throw new Error(
+            "Cannot identify the upstream import: expected a two-parent merge directly from fork main. Review the branch ancestry.",
+        );
+    }
+
+    return upstreamTitle(parents[1]);
+}
+
+function existingPR(branch, pushed = false) {
+    const prs = JSON.parse(
+        run(
+            "gh",
+            [
+                "pr",
+                "list",
+                "--repo",
+                forkRepository,
+                "--head",
+                branch,
+                "--state",
+                "open",
+                "--json",
+                "url,baseRefName,headRepositoryOwner,headRepository",
+            ],
+            true,
+        ),
+    );
+
+    const matches = prs.filter(
+        (pr) =>
+            pr.headRepositoryOwner?.login?.toLowerCase() === "lingmann" &&
+            pr.headRepository?.name?.toLowerCase() === "pi-pocket",
+    );
+
+    if (matches.length) {
+        console.log(
+            `An open PR already exists: ${matches.map((pr) => pr.url).join(", ")}. ${pushed ? "The branch was pushed; no duplicate PR was created." : "No branch was pushed and no PR was created."} Review the existing PR instead.`,
+        );
+
+        return true;
+    }
+
+    return false;
+}
+
+async function pr(description = "") {
+    if (/[\r\n\x00-\x1f\x7f]/.test(description)) {
+        throw new Error(
+            'Supply a single-line description, for example: just pr "fix voice playback"',
+        );
+    }
+
+    const ctx = context();
+
+    description = description.trim();
+
+    if (!ctx.branch.startsWith("sync/upstream-")) {
+        description = description.replace(/^fork:\s*/, "");
+
+        if (!description || /^upstream:/.test(description)) {
+            throw new Error('Supply a fork description, for example: just pr "fix voice playback"');
+        }
+    }
+
+    if (ctx.branch === "main") {
+        throw new Error("Create PRs from a feature or upstream-update branch, never main.");
+    }
+
+    publicationDestination(ctx);
+    run("gh", ["auth", "status", "--hostname", "github.com"], true);
+
+    if (existingPR(ctx.branch)) {
+        return;
+    }
+
+    const base = fetchMain("origin");
+
+    if (!gitOK("merge-base", "--is-ancestor", base, ctx.head)) {
+        throw new Error("Update this branch to include origin/main before publishing.");
+    }
+
+    if (base === ctx.head) {
+        throw new Error("This branch has no changes beyond origin/main.");
+    }
+
+    const title = prTitle(ctx, description.trim(), base);
+
+    await confirm(
+        `Publish ${ctx.branch} at ${ctx.head} and create a PR?\nRepository: ${forkRepository}\nBase: main\nTitle: ${title}\nOnly this branch will be pushed, without force.`,
+    );
+    unchanged(ctx);
+    publicationDestination(ctx);
+
+    if (existingPR(ctx.branch)) {
+        return;
+    }
+
+    unchanged(ctx);
+    publicationDestination(ctx);
+    run("git", ["push", "--no-follow-tags", "origin", `${ctx.head}:refs/heads/${ctx.branch}`]);
+
+    try {
+        unchanged(ctx);
+        publicationDestination(ctx);
+
+        if (!existingPR(ctx.branch, true)) {
+            run("gh", [
+                "pr",
+                "create",
+                "--repo",
+                forkRepository,
+                "--base",
+                "main",
+                "--head",
+                `lingmann:${ctx.branch}`,
+                "--title",
+                title,
+                "--body",
+                description || title,
+            ]);
+        }
+    } catch (error) {
+        console.error(
+            `Branch ${ctx.branch} was pushed at ${ctx.head}, but PR creation did not finish. Retry just pr with the same description; it checks for an existing PR before pushing or creating another.`,
+        );
+
+        throw error;
+    }
 }
 
 function check() {
@@ -227,7 +423,6 @@ function check() {
     run(process.execPath, [
         "--test",
         ...tests,
-        "test/fork-workflow.test.ts",
         "test/voice.test.ts",
         "test/service-worker.test.ts",
         "test/notify.test.ts",
@@ -275,20 +470,11 @@ async function release(version) {
     fetchMain("origin");
     releaseMain(ctx);
     await confirm(
-        `Check and publish ${tag}?\nFork main: ${ctx.head}\nDestination: origin (${ctx.pushURL})\nConfirm only after the required manual release checks. Only the new tag will be pushed; this does not deploy.`,
+        `Publish ${tag}?\nFork main: ${ctx.head}\nDestination: origin (${ctx.pushURL})\nConfirm only after main has been reviewed and tested, including required GitHub checks and manual release checks. No local tests will run. Only the new tag will be pushed; this does not deploy.`,
     );
     unchanged(ctx);
-    check();
-    unchanged(ctx);
     releaseMain(ctx);
-    run("git", [
-        "tag",
-        "-a",
-        tag,
-        ctx.head,
-        "-m",
-        `Victor ${version}\n\nFork main: ${ctx.head}\nAutomated checks: just check`,
-    ]);
+    run("git", ["tag", "-a", tag, ctx.head, "-m", `Victor ${version}\n\nFork main: ${ctx.head}`]);
 
     try {
         unchanged(ctx);
@@ -334,15 +520,16 @@ function status() {
 
 try {
     const [action, argument, ...extra] = process.argv.slice(2);
-    const actions = { status, check, "upstream-update": upstreamUpdate, release };
+    const actions = { status, check, feature, "upstream-update": upstreamUpdate, pr, release };
 
     if (
         !Object.hasOwn(actions, action ?? "") ||
         extra.length ||
-        (argument !== undefined && !["upstream-update", "release"].includes(action))
+        (argument !== undefined &&
+            !["feature", "upstream-update", "release", "pr"].includes(action))
     ) {
         throw new Error(
-            "Usage: node scripts/fork.mjs status|check|upstream-update NAME|release VERSION",
+            "Usage: node scripts/victor/fork.mjs status|check|feature SLUG|upstream-update NAME|pr [DESCRIPTION]|release VERSION",
         );
     }
 

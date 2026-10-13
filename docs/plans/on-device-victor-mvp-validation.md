@@ -67,7 +67,7 @@ The user requested larger or higher-quality candidates, **without any architectu
 Prepare the pinned assets on the server:
 
 ```sh
-node scripts/prepare-victor-assets.mjs
+node scripts/victor/prepare-victor-assets.mjs
 ```
 
 Start the throwaway app with a verified WAV fixture. This creates temporary app data, not a copy of the live conversations:

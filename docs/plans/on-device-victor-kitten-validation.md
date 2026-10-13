@@ -48,7 +48,7 @@ Full logs and reruns are under `/tmp/pi-pocket-kitten-validation/`. No live-serv
 
 ## Repeat the browser check
 
-1. Run `node scripts/prepare-victor-assets.mjs` to verify and install the pinned assets.
+1. Run `node scripts/victor/prepare-victor-assets.mjs` to verify and install the pinned assets.
 2. Start the [throwaway app](../self-editing.md#check-it-on-a-copy) with `POCKET_VICTOR_FIXTURE=/absolute/path/to/verified.wav`. Do not use live data. On macOS, use an unused port on `127.0.0.1`, with the real app opened as `localhost`.
 3. Open its owner sign-in link, select the seeded session, and use a 390 × 844 viewport. Install the observer before tapping **Victor**:
 

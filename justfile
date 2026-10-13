@@ -8,7 +8,7 @@ export TAILSCALE_BIN := env('TAILSCALE_BIN', tailscale_cli)
 # Verify prepared Victor assets; download and rebuild the full bundle when needed.
 [group('run')]
 prepare-victor:
-    node scripts/prepare-victor-assets.mjs
+    node scripts/victor/prepare-victor-assets.mjs
 
 # Configure persistent Tailscale HTTPS, then prepare Victor and start Pi Pocket.
 [group('run')]
@@ -37,19 +37,29 @@ tailscale-status:
 # Show working-tree/tracking status, first-parent fork-main history, and local release tags; no fetch.
 [group('repo')]
 status:
-    node scripts/fork.mjs status
+    node scripts/victor/fork.mjs status
 
 # Run TypeScript and focused Victor/shared tests; no formatting or Git changes.
 [group('repo')]
 check:
-    node scripts/fork.mjs check
+    node scripts/victor/fork.mjs check
+
+# Fetch fork main, then confirm a new $USER/SLUG feature branch; requires a clean checkout.
+[group('repo')]
+feature $slug:
+    node scripts/victor/fork.mjs feature "$slug"
 
 # Fetch, then confirm a new sync/upstream-NAME branch merging upstream/main; never push.
 [group('repo')]
 upstream-update $name:
-    node scripts/fork.mjs upstream-update "$name"
+    node scripts/victor/fork.mjs upstream-update "$name"
 
-# Confirm, check clean shared main, and push a new victor/vVERSION tag (X.Y.Z); never deploy.
+# Confirm, push the current branch, and open a prefixed PR; omit description for upstream updates.
+[group('repo')]
+pr $description='':
+    node scripts/victor/fork.mjs pr "$description"
+
+# Confirm and tag already reviewed/tested clean main as victor/vVERSION (X.Y.Z); no local checks or deployment.
 [group('repo')]
 release $version:
-    node scripts/fork.mjs release "$version"
+    node scripts/victor/fork.mjs release "$version"
