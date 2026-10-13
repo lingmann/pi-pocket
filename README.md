@@ -41,7 +41,7 @@ While it runs: **q** quit · **r** restart server · **a** change access · **o*
 - **Watches and webhooks.** Tell PiP to watch a GitHub repository ("when CI fails on main, fix it and tell me"), or watch a pull request from a session until it merges; webhooks bring other services' posts to Pi. Only the repository's own people count, unless you say anyone.
 - **Memory.** Lessons Pi keeps across sessions, per project or everywhere. Pi proposes them; the owner approves what it saw.
 - **Dictation.** Speak into the message box, or PiP's, with the browser's own speech recognition (Web Speech API).
-- **Victor (experimental, English).** This fork's separate on-device conversation mode recognizes speech and reads Pi's replies locally. Tap **Victor**, then say “send it” to submit. Prepare the pinned assets with `node scripts/prepare-victor-assets.mjs`; the first browser download is about 149 MB. See [Victor setup and limits](docs/victor.md).
+- **Victor (experimental, English).** This fork's separate on-device conversation mode recognizes speech and reads Pi's replies locally. Tap **Victor**, then say “send it” to submit. Prepare the pinned assets with `node scripts/victor/prepare-victor-assets.mjs`; the first browser download is about 149 MB. See [Victor setup and limits](docs/victor.md).
 - **Forks.** Fork from any reply, edit a message and send it again, or retry it with another model. Each fork is a session of its own, optionally in a git worktree of its own.
 - **Works while you're away.** Schedule messages to Pi (`/schedule every weekday 8:00 summarize CI`), and `/until npm test` keeps Pi going until the check passes.
 - **Plan mode.** Pi reads and proposes a plan; nothing changes until someone approves it.

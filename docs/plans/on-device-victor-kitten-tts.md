@@ -12,7 +12,7 @@ No voice/model picker, cloud or system-speech fallback, new runtime, server spee
 
 ## 1. Add pinned TTS assets
 
-Files: `victor-assets.json`, `scripts/prepare-victor-assets.mjs`.
+Files: `victor-assets.json`, `scripts/victor/prepare-victor-assets.mjs`.
 
 - Keep the current sherpa runtime, ASR wrapper and Kroko files unchanged. Add the matching `assets/sherpa-onnx-tts.js` from the already-pinned `sherpa_onnx_web` 1.13.8 archive. Its SHA-256 is `b9cb4782010b22d64be31298a3e407170d2b8f5def471ea6011c42a921577e8f`.
 - Add the [Kitten Micro v0.8 archive](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-micro-en-v0_8.tar.bz2), SHA-256 `85faaea7511ca9d1d2f251fed0a4553bdf0d1ee046102fa60ddd8046c751f76f`.

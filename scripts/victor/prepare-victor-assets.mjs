@@ -10,7 +10,7 @@ import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
 
-const root = fileURLToPath(new URL("../", import.meta.url));
+const root = fileURLToPath(new URL("../../", import.meta.url));
 const directory = join(root, "vendor", "victor");
 const exec = promisify(execFile);
 const labels = ["runtime", "model", "tts"];
@@ -575,7 +575,7 @@ async function prepare() {
     const { values } = parseArgs({ options: { help: { type: "boolean", short: "h" } } });
 
     if (values.help) {
-        console.log(`Usage: node scripts/prepare-victor-assets.mjs
+        console.log(`Usage: node scripts/victor/prepare-victor-assets.mjs
 
 Prepares 12 Victor assets from the 3 pinned archives in victor-sources.json.
 Skips downloading only when source and builder inputs match the last successful build

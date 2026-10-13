@@ -43,7 +43,7 @@ Use one new manifest schema and reject unsupported schemas. Keep the existing pu
 ## 2. One preparation command
 
 ```sh
-node scripts/prepare-victor-assets.mjs
+node scripts/victor/prepare-victor-assets.mjs
 ```
 
 Every invocation follows the same decision:
@@ -124,7 +124,7 @@ Old archives, prepared directories, and cached assets are disposable. Do not tra
 Implementation stays in Victor-owned files:
 
 - Add `victor-sources.json`; remove the checked-in `victor-assets.json`.
-- Update `scripts/prepare-victor-assets.mjs`, `web/victor-worker.js`, and `src/server/http/victor-assets.ts`.
+- Update `scripts/victor/prepare-victor-assets.mjs`, `web/victor-worker.js`, and `src/server/http/victor-assets.ts`.
 - Adapt `test/victor-*.test.ts` and document the workflow in `docs/victor.md`.
 
 No new changes to Composer, app startup, shared HTTP routing, service-worker registration, `web/sw.js`, package dependencies, shared build tooling, CSP, or application data. Keep pack-building and mounting routines in their existing owners rather than creating a generic asset framework.

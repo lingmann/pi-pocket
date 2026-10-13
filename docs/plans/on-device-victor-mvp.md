@@ -105,7 +105,7 @@ For command handling, a matching partial is a **candidate**, not an immediate PO
 
 ## Implementation sequence and likely files
 
-1. **Deliver one pinned ASR bundle.** Add `scripts/prepare-victor-assets.mjs`, a checked-in manifest, `.gitignore` entries, and the small static route/MIME/CSP changes in `src/server/http.ts` and `src/server/http/assets.ts`. No dependency framework or app build pipeline.
+1. **Deliver one pinned ASR bundle.** Add `scripts/victor/prepare-victor-assets.mjs`, a checked-in manifest, `.gitignore` entries, and the small static route/MIME/CSP changes in `src/server/http.ts` and `src/server/http/assets.ts`. No dependency framework or app build pipeline.
 2. **Add capture and recognition.** Add `web/victor-capture-worklet.js` and `web/victor-worker.js`. Own stream creation/freeing and transfer PCM at its actual sample rate. Implement partial/final transcript messages and explicit finalization.
 3. **Add the mode and keyword submission.** Add `web/victor-mode.js`; wire a Victor toggle, Listen control, status and Victor draft into `web/composer.js` and minimal CSS. Reuse the store/API helpers. Add an explicit-ID/request-ID submission helper only if necessary; preserve existing typed-message behavior.
 4. **Read the completed reply aloud.** In the same mode controller, observe committed views, choose the new final answer conservatively, extract plain text, and invoke native local TTS. Implement local cancellation and teardown; no separate narration subsystem.

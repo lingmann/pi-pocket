@@ -3,6 +3,7 @@ name: Fork checks
 on:
     pull_request:
         branches: [main]
+        types: [opened, synchronize, reopened, edited]
     push:
         branches: [main]
 
@@ -24,7 +25,10 @@ jobs:
               with:
                   node-version: "24"
                   cache: npm
+            - name: Check PR title
+              if: github.event_name == 'pull_request'
+              run: node scripts/victor/check-pr-title.mjs
             - name: Verify Chrome is available
               run: '"$PI_POCKET_BROWSER" --version'
             - run: npm ci
-            - run: node scripts/fork.mjs check
+            - run: node scripts/victor/fork.mjs check
