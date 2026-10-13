@@ -17,7 +17,7 @@ start: tailscale-setup start-local
 # Prepare Victor, then start on 127.0.0.1:8787 without changing Tailscale Serve.
 [group('run')]
 start-local: prepare-victor
-    npm start -- --access local --host 127.0.0.1 --port 8787
+    npm start -- --access local --host 127.0.0.1 --port 8787 --cwd "${PI_POCKET_CWD:-$PWD}"
 
 # Proxy tailnet-only HTTPS on port 8443; leave the existing port-443 service alone.
 [group('tailscale')]
