@@ -1,0 +1,9 @@
+[tools]
+just = "latest"
+
+[env]
+JUST_LIST_HEADING = "For recipe arguments: just --usage <recipe>\n\nAvailable recipes:\n"
+
+[hooks.enter]
+shell = "bash"
+script = "source <(just --completions bash)"

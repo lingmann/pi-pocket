@@ -664,14 +664,21 @@ function status() {
 }
 
 try {
-    const [action, argument, ...extra] = process.argv.slice(2);
+    const args = process.argv.slice(2);
+
+    if (args.some((arg) => arg.trimStart().startsWith("-"))) {
+        throw new Error("Options and values starting with '-' are not supported.");
+    }
+
+    const [action, argument, ...extra] = args;
     const actions = { status, check, feature, "upstream-update": upstreamUpdate, pr, release };
+    const noArguments = action === "status" || action === "check";
 
     if (
         !Object.hasOwn(actions, action ?? "") ||
         extra.length ||
-        (argument !== undefined &&
-            !["feature", "upstream-update", "release", "pr"].includes(action))
+        (argument !== undefined && noArguments) ||
+        (argument === undefined && !noArguments && action !== "pr")
     ) {
         throw new Error(
             "Usage: node scripts/victor/fork.mjs status|check|feature SLUG|upstream-update NAME|pr [DESCRIPTION]|release VERSION",

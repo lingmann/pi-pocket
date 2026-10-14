@@ -30,5 +30,6 @@ jobs:
               run: node scripts/victor/check-pr-title.mjs
             - name: Verify Chrome is available
               run: '"$PI_POCKET_BROWSER" --version'
+            - uses: extractions/setup-just@v3
             - run: npm ci
             - run: node scripts/victor/fork.mjs check

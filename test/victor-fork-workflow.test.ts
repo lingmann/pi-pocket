@@ -403,6 +403,53 @@ function assertNoPublish(calls: string[][]) {
     );
 }
 
+test("fork script rejects malformed input and unsupported options before running Git or GitHub", (t) => {
+    const cwd = mkdtempSync(join(tmpdir(), "fork-usage-"));
+    const trace = join(cwd, "commands.log");
+
+    t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+    for (const name of ["git", "gh"]) {
+        writeFileSync(join(cwd, name), '#!/bin/sh\necho called >> "$COMMAND_TRACE"\nexit 1\n', {
+            mode: 0o755,
+        });
+    }
+
+    for (const args of [
+        [],
+        ["unknown"],
+        ["check", "status"],
+        ["status", "extra"],
+        ["feature"],
+        ["upstream-update"],
+        ["release"],
+        ["feature", "one", "two"],
+        ["upstream-update", "one", "two"],
+        ["pr", "one", "two"],
+        ["release", "1.2.3", "extra"],
+        ["--help"],
+        ["pr", "  --help"],
+        ["pr", "-description"],
+        ["pr", "description", "--help"],
+        ...["status", "check", "feature", "upstream-update", "pr", "release"].flatMap((action) =>
+            ["-h", "--help", "--unknown"].map((flag) => [action, flag]),
+        ),
+    ]) {
+        const result = spawnSync(process.execPath, [helper, ...args], {
+            cwd,
+            env: { ...process.env, PATH: cwd, COMMAND_TRACE: trace },
+            encoding: "utf8",
+            timeout: 10_000,
+        });
+
+        assert.ifError(result.error);
+        assert.equal(result.status, 1);
+        assert.equal(result.stdout, "");
+        assert.notEqual(result.stderr.trim(), "");
+        assert.equal(existsSync(trace), false, result.stderr);
+    }
+});
+
 test("status fetches upstream without changing dirty detached HEAD, with origin history and local fallback", (t) => {
     const f = fixture(t);
 

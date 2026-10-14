@@ -10,6 +10,12 @@ Keep all Victor and fork-maintenance scripts under `scripts/victor/` so they rem
 
 Keep Victor fork-specific tests directly under `test/` and name them `victor-<behavior>.test.ts`, including fork-maintenance tests (for example, `victor-fork-workflow.test.ts`). This keeps them distinct from upstream tests and included in automatic Victor test discovery.
 
+## Just recipes and scripts
+
+Use **recipe** for a named entry in `justfile`, **command** for a shell invocation, and **script** for the implementation a recipe calls, such as `scripts/victor/fork.mjs`. Do not use “task” or “target” as synonyms for a Just recipe. Name the responsible layer when explaining argument parsing, validation, or errors.
+
+Use native Just interfaces: explicit recipe parameters, comments for operations, `[arg('name', help='…')]` for input guidance, `just` for discovery, and `just --usage <recipe>` for syntax. Keep recipes thin and quiet. Scripts retain operational logic, input validation, and safety guards for direct calls and CI; reject unsupported option-like input before operational work. Keep detailed fork instructions in `docs/fork-workflow.md`. Test the actual Just entry point for listing, native usage, and argument forwarding, as well as the script's early rejection of invalid input.
+
 ## Validation
 
 This policy replaces blanket validation and repository-wide formatting requirements in `AGENTS.md`, `docs/self-editing.md`, and `docs/architecture.md`, including full-suite requirements before completion or a restart. All other upstream safety rules still apply, including protecting live data and asking before a restart.

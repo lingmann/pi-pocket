@@ -1,65 +1,70 @@
 set default-list
+set positional-arguments
 
 # Use the macOS app's CLI when available; TAILSCALE_BIN can override it.
 tailscale_app := '/Applications/Tailscale.app/Contents/MacOS/Tailscale'
 tailscale_cli := if path_exists(tailscale_app) == 'true' { tailscale_app } else { 'tailscale' }
 export TAILSCALE_BIN := env('TAILSCALE_BIN', tailscale_cli)
 
-# Verify prepared Victor assets; download and rebuild the full bundle when needed.
+# Prepare Victor speech assets.
 [group('run')]
 prepare-victor:
-    node scripts/victor/prepare-victor-assets.mjs
+    @node scripts/victor/prepare-victor-assets.mjs
 
-# Configure persistent Tailscale HTTPS, then prepare Victor and start Pi Pocket.
+# Start Pi Pocket with Tailscale HTTPS.
 [group('run')]
 start: tailscale-setup start-local
 
-# Prepare Victor, then start on 127.0.0.1:8787 without changing Tailscale Serve.
+# Start Pi Pocket locally without configuring Tailscale.
 [group('run')]
 start-local: prepare-victor
     npm start -- --access local --host 127.0.0.1 --port 8787 --cwd "${PI_POCKET_CWD:-$PWD}"
 
-# Proxy tailnet-only HTTPS on port 8443; leave the existing port-443 service alone.
+# Enable Pi Pocket's Tailscale HTTPS proxy.
 [group('tailscale')]
 tailscale-setup:
     "$TAILSCALE_BIN" serve --bg --https=8443 http://127.0.0.1:8787
 
-# Remove only the port-8443 HTTPS proxy; leave the port-443 service alone.
+# Disable Pi Pocket's Tailscale HTTPS proxy.
 [group('tailscale')]
 tailscale-stop:
     "$TAILSCALE_BIN" serve --https=8443 off
 
-# Show Tailscale Serve routes and their HTTPS addresses.
+# Show Tailscale Serve routes.
 [group('tailscale')]
 tailscale-status:
     "$TAILSCALE_BIN" serve status
 
-# Fetch upstream; show incoming updates, recent fork history, and local changes.
+# Fetch upstream and show repository status.
 [group('repo')]
 repo-status:
     @node scripts/victor/fork.mjs status
 
-# Run TypeScript and focused Victor/shared tests; no formatting or Git changes.
+# Run TypeScript and focused tests.
 [group('repo')]
 check:
-    node scripts/victor/fork.mjs check
+    @node scripts/victor/fork.mjs check
 
-# Fetch fork main, then confirm a new $USER/SLUG feature branch; requires a clean checkout.
+# Create a feature branch.
+[arg('slug', help='Branch suffix, e.g. voice-fix; creates $USER/SLUG from fetched origin/main. Requires a clean checkout and confirmation.')]
 [group('repo')]
-feature $slug:
-    node scripts/victor/fork.mjs feature "$slug"
+feature slug:
+    @node scripts/victor/fork.mjs feature "$@"
 
-# Fetch, then confirm a new sync/upstream-NAME branch merging upstream/main; never push.
+# Merge upstream updates on a new branch.
+[arg('name', help='Branch label, e.g. v0.13.3; creates sync/upstream-NAME and merges upstream/main. Requires a clean checkout and confirmation. Does not push.')]
 [group('repo')]
-upstream-update $name:
-    node scripts/victor/fork.mjs upstream-update "$name"
+upstream-update name:
+    @node scripts/victor/fork.mjs upstream-update "$@"
 
-# Confirm, push the current branch, and open a prefixed PR; omit description for upstream updates.
+# Push this branch and open a pull request.
+[arg('description', help='Quoted PR description; required for features, optional for upstream updates. Must not start with - after ignoring leading whitespace. Requires a clean checkout and confirmation.')]
 [group('repo')]
-pr $description='':
-    node scripts/victor/fork.mjs pr "$description"
+pr description='':
+    @node scripts/victor/fork.mjs pr "$@"
 
-# Confirm and tag already reviewed/tested clean main as victor/vVERSION (X.Y.Z); no local checks or deployment.
+# Publish a Victor release tag.
+[arg('version', help='X.Y.Z, e.g. 1.2.3; publishes victor/vX.Y.Z from reviewed/tested clean main after confirmation. Does not run local checks or deploy.')]
 [group('repo')]
-release $version:
-    node scripts/victor/fork.mjs release "$version"
+release version:
+    @node scripts/victor/fork.mjs release "$@"

@@ -34,6 +34,22 @@ Use a **development checkout, never the checkout serving Pi Pocket**. Install de
 
 `upstream` is `TannerMidd/pi-pocket`; `origin` fetches and pushes `lingmann/pi-pocket`. Local `main` tracks `origin/main`.
 
+## Running Just recipes
+
+A **recipe** is a named entry in `justfile`, such as `pr`. The command `just pr "fix voice playback"` runs the `pr` recipe, which calls the `scripts/victor/fork.mjs` script.
+
+Run `just` to list recipes. Run `just --usage pr` to see the arguments for `pr`.
+
+Just parses recipe names and arguments before running the script. It assigns words to each recipe's arguments first, then looks for another recipe name:
+
+- `just check repo-status` runs two recipes: `check`, then `repo-status`.
+- `just pr check` passes `check` as the PR description; it does not run the `check` recipe.
+- `just pr '' check` runs `pr` with an empty description, then runs `check`. The empty description is valid only for upstream-update PRs, and publication happens before the checks.
+
+The `fork.mjs` script validates the argument values. It does not accept flags such as `--help`. Before running Git, it rejects any argument that starts with `-`, ignoring leading whitespace. This includes quoted PR descriptions such as `"  - fix bug"`.
+
+Prefer running one recipe per command. Just rejects unknown recipe names and missing required arguments before any recipe runs. If `fork.mjs` later fails, Just stops, but it does not undo work from earlier recipes.
+
 ## Daily use
 
 | Command                            | Effect                                                                                                |
