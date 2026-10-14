@@ -107,6 +107,8 @@ These are integration hooks and shared dependencies, not files owned exclusively
 
 This is a starting point for selecting tests by affected behavior, not a requirement to run every listed suite. Changes to a shared contract also need its upstream tests. Keep failure signatures and their baseline evidence in [TEST_ISSUES.md](../TEST_ISSUES.md), not in this map.
 
+[`victor-just-interface.test.ts`](../test/victor-just-interface.test.ts) checks listings, native usage, argument forwarding, and rejection of unsupported options before Git or GitHub run, using disposable fixtures. It requires Just on `PATH` (`mise install just`); CI installs the latest release.
+
 | Behavior                                                                                                   | Tests to inspect                                                                                                                                                                                                                                    |
 | ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Shared-main guards, upstream merge ancestry, PR publication, release tagging, and failed-operation safety  | [`victor-fork-workflow.test.ts`](../test/victor-fork-workflow.test.ts), using disposable local repositories and remotes.                                                                                                                                          |

@@ -10,9 +10,11 @@ Keep all Victor and fork-maintenance scripts under `scripts/victor/` so they rem
 
 Keep Victor fork-specific tests directly under `test/` and name them `victor-<behavior>.test.ts`, including fork-maintenance tests (for example, `victor-fork-workflow.test.ts`). This keeps them distinct from upstream tests and included in automatic Victor test discovery.
 
-## Command interface
+## Just recipes and scripts
 
-Use native Just interfaces: explicit recipe parameters, comments for descriptions, `just` for discovery, and `just --usage <recipe>` for syntax. Keep recipes thin and quiet; do not add parameters or script help solely to support `just <recipe> --help`. Scripts retain operational logic, input validation, and safety guards for direct calls and CI. Keep detailed fork instructions in `docs/fork-workflow.md`. Verify listing, native usage, and argument forwarding when changing this interface.
+Use **recipe** for a named entry in `justfile`, **command** for a shell invocation, and **script** for the implementation a recipe calls, such as `scripts/victor/fork.mjs`. Do not use “task” or “target” as synonyms for a Just recipe. Name the responsible layer when explaining argument parsing, validation, or errors.
+
+Use native Just interfaces: explicit recipe parameters, comments for operations, `[arg('name', help='…')]` for input guidance, `just` for discovery, and `just --usage <recipe>` for syntax. Keep recipes thin and quiet. Scripts retain operational logic, input validation, and safety guards for direct calls and CI; reject unsupported option-like input before operational work. Keep detailed fork instructions in `docs/fork-workflow.md`. Test the actual Just entry point for listing, native usage, and argument forwarding, as well as the script's early rejection of invalid input.
 
 ## Validation
 

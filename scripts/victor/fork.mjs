@@ -664,7 +664,13 @@ function status() {
 }
 
 try {
-    const [action, argument, ...extra] = process.argv.slice(2);
+    const args = process.argv.slice(2);
+
+    if (args.some((arg) => arg.trimStart().startsWith("-"))) {
+        throw new Error("Options and values starting with '-' are not supported.");
+    }
+
+    const [action, argument, ...extra] = args;
     const actions = { status, check, feature, "upstream-update": upstreamUpdate, pr, release };
     const noArguments = action === "status" || action === "check";
 
