@@ -10,6 +10,10 @@ Keep all Victor and fork-maintenance scripts under `scripts/victor/` so they rem
 
 Keep Victor fork-specific tests directly under `test/` and name them `victor-<behavior>.test.ts`, including fork-maintenance tests (for example, `victor-fork-workflow.test.ts`). This keeps them distinct from upstream tests and included in automatic Victor test discovery.
 
+## Command interface
+
+Keep Just recipes thin and quiet. Use named parameters for fixed inputs and `*options` for flag-only commands; reserve `*args` for genuinely unrestricted forwarding. Preserve `just <recipe> --help` and `-h` for preparation and repository recipes. Scripts own command-specific help and validation; help and usage errors must use public recipe names and run before operational side effects. Verify listing, help, and argument forwarding when changing this interface.
+
 ## Validation
 
 This policy replaces blanket validation and repository-wide formatting requirements in `AGENTS.md`, `docs/self-editing.md`, and `docs/architecture.md`, including full-suite requirements before completion or a restart. All other upstream safety rules still apply, including protecting live data and asking before a restart.

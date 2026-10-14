@@ -77,6 +77,8 @@ Cloudflare mode needs `cloudflared`. On Linux the launcher can download the offi
 
 With Tailscale connected and `just` installed, run `just start` from this checkout. It configures a persistent, tailnet-only HTTPS proxy on port **8443**, leaving any service on port 443 untouched, then starts Pi Pocket on `127.0.0.1:8787`. Open the HTTPS address printed by Tailscale on your phone, with Tailscale connected there too. Sign in again on the new address; HTTPS enables browser dictation and push notifications.
 
+Set `PI_POCKET_CWD` to choose the agent's working directory, e.g. `PI_POCKET_CWD="$HOME/code/my-project" just start`; it defaults to this checkout, even when invoking `just` from a subdirectory.
+
 Run `just` to list the recipes:
 
 - `just tailscale-setup`: configure the HTTPS proxy without starting Pi Pocket.

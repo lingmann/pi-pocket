@@ -1,4 +1,5 @@
 set default-list
+set positional-arguments
 
 # Use the macOS app's CLI when available; TAILSCALE_BIN can override it.
 tailscale_app := '/Applications/Tailscale.app/Contents/MacOS/Tailscale'
@@ -7,8 +8,8 @@ export TAILSCALE_BIN := env('TAILSCALE_BIN', tailscale_cli)
 
 # Verify prepared Victor assets; download and rebuild the full bundle when needed.
 [group('run')]
-prepare-victor:
-    node scripts/victor/prepare-victor-assets.mjs
+prepare-victor *options:
+    @node scripts/victor/prepare-victor-assets.mjs "$@"
 
 # Configure persistent Tailscale HTTPS, then prepare Victor and start Pi Pocket.
 [group('run')]
@@ -36,30 +37,30 @@ tailscale-status:
 
 # Fetch upstream; show incoming updates, recent fork history, and local changes.
 [group('repo')]
-repo-status:
-    @node scripts/victor/fork.mjs status
+repo-status *options:
+    @node scripts/victor/fork.mjs status "$@"
 
 # Run TypeScript and focused Victor/shared tests; no formatting or Git changes.
 [group('repo')]
-check:
-    node scripts/victor/fork.mjs check
+check *options:
+    @node scripts/victor/fork.mjs check "$@"
 
 # Fetch fork main, then confirm a new $USER/SLUG feature branch; requires a clean checkout.
 [group('repo')]
-feature $slug:
-    node scripts/victor/fork.mjs feature "$slug"
+feature slug:
+    @node scripts/victor/fork.mjs feature "$@"
 
 # Fetch, then confirm a new sync/upstream-NAME branch merging upstream/main; never push.
 [group('repo')]
-upstream-update $name:
-    node scripts/victor/fork.mjs upstream-update "$name"
+upstream-update name:
+    @node scripts/victor/fork.mjs upstream-update "$@"
 
 # Confirm, push the current branch, and open a prefixed PR; omit description for upstream updates.
 [group('repo')]
-pr $description='':
-    node scripts/victor/fork.mjs pr "$description"
+pr description='':
+    @node scripts/victor/fork.mjs pr "$@"
 
 # Confirm and tag already reviewed/tested clean main as victor/vVERSION (X.Y.Z); no local checks or deployment.
 [group('repo')]
-release $version:
-    node scripts/victor/fork.mjs release "$version"
+release version:
+    @node scripts/victor/fork.mjs release "$@"
