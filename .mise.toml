@@ -2,7 +2,7 @@
 just = "latest"
 
 [env]
-JUST_LIST_HEADING = "For preparation and repo command options: just <recipe> --help\n\nAvailable recipes:\n"
+JUST_LIST_HEADING = "For recipe arguments: just --usage <recipe>\n\nAvailable recipes:\n"
 
 [hooks.enter]
 shell = "bash"

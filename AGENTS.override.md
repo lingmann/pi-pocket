@@ -12,7 +12,7 @@ Keep Victor fork-specific tests directly under `test/` and name them `victor-<be
 
 ## Command interface
 
-Keep Just recipes thin and quiet. Use named parameters for fixed inputs and `*options` for flag-only commands; reserve `*args` for genuinely unrestricted forwarding. Preserve `just <recipe> --help` and `-h` for preparation and repository recipes. Scripts own command-specific help and validation; help and usage errors must use public recipe names and run before operational side effects. Verify listing, help, and argument forwarding when changing this interface.
+Use native Just interfaces: explicit recipe parameters, comments for descriptions, `just` for discovery, and `just --usage <recipe>` for syntax. Keep recipes thin and quiet; do not add parameters or script help solely to support `just <recipe> --help`. Scripts retain operational logic, input validation, and safety guards for direct calls and CI. Keep detailed fork instructions in `docs/fork-workflow.md`. Verify listing, native usage, and argument forwarding when changing this interface.
 
 ## Validation
 

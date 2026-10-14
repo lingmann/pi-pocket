@@ -8,8 +8,8 @@ export TAILSCALE_BIN := env('TAILSCALE_BIN', tailscale_cli)
 
 # Verify prepared Victor assets; download and rebuild the full bundle when needed.
 [group('run')]
-prepare-victor *options:
-    @node scripts/victor/prepare-victor-assets.mjs "$@"
+prepare-victor:
+    @node scripts/victor/prepare-victor-assets.mjs
 
 # Configure persistent Tailscale HTTPS, then prepare Victor and start Pi Pocket.
 [group('run')]
@@ -37,13 +37,13 @@ tailscale-status:
 
 # Fetch upstream; show incoming updates, recent fork history, and local changes.
 [group('repo')]
-repo-status *options:
-    @node scripts/victor/fork.mjs status "$@"
+repo-status:
+    @node scripts/victor/fork.mjs status
 
 # Run TypeScript and focused Victor/shared tests; no formatting or Git changes.
 [group('repo')]
-check *options:
-    @node scripts/victor/fork.mjs check "$@"
+check:
+    @node scripts/victor/fork.mjs check
 
 # Fetch fork main, then confirm a new $USER/SLUG feature branch; requires a clean checkout.
 [group('repo')]

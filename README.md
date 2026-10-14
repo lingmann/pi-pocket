@@ -79,7 +79,7 @@ With Tailscale connected and `just` installed, run `just start` from this checko
 
 Set `PI_POCKET_CWD` to choose the agent's working directory, e.g. `PI_POCKET_CWD="$HOME/code/my-project" just start`; it defaults to this checkout, even when invoking `just` from a subdirectory.
 
-Run `just` to list the recipes:
+Run `just` to list recipes and their descriptions; use `just --usage <recipe>` for arguments, not `just <recipe> --help`. Fork operations are explained in [the fork workflow](docs/fork-workflow.md). The launch recipes include:
 
 - `just tailscale-setup`: configure the HTTPS proxy without starting Pi Pocket.
 - `just start-local`: start Pi Pocket on loopback without changing Serve's configuration.

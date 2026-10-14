@@ -664,83 +664,19 @@ function status() {
 }
 
 try {
-    const args = process.argv.slice(2);
-    const [action, argument, ...extra] = args;
+    const [action, argument, ...extra] = process.argv.slice(2);
     const actions = { status, check, feature, "upstream-update": upstreamUpdate, pr, release };
-    const help = {
-        status: [
-            "repo-status",
-            "Fetch upstream and show incoming updates, recent fork history, and local changes.",
-        ],
-        check: [
-            "check",
-            "Run TypeScript and focused Victor/shared/tooling tests.\nDoes not format files or change Git state.",
-        ],
-        feature: ["feature SLUG", "Create $USER/SLUG from freshly fetched origin/main."],
-        "upstream-update": [
-            "upstream-update NAME",
-            "Create sync/upstream-NAME and merge upstream/main. Does not push.",
-        ],
-        pr: [
-            "pr [DESCRIPTION]",
-            "Push the current branch and open a prefixed PR.\nQuote the description; it is required for feature branches and optional for upstream updates.",
-        ],
-        release: [
-            "release X.Y.Z",
-            "Tag and push victor/vX.Y.Z from reviewed/tested main.\nDoes not run local checks or deploy.",
-        ],
-    };
-    const scriptUsage = "Usage: node scripts/victor/fork.mjs COMMAND [ARGUMENT]";
-    const wantsHelp = args.some((arg) => arg === "--help" || arg === "-h");
-
-    if (action === "--help" || action === "-h") {
-        console.log(`${scriptUsage}\n\nCommands:`);
-
-        for (const [name, [usage]] of Object.entries(help)) {
-            console.log(`  ${usage.replace(/^\S+/, name)}`);
-        }
-
-        console.log(
-            '\nRun node scripts/victor/fork.mjs COMMAND --help for command details.\nRun `just` to list public recipes; script command "status" is `just repo-status`.',
-        );
-        process.exit(0);
-    }
-
-    if (!Object.hasOwn(actions, action ?? "")) {
-        throw new Error(
-            `${action ? `Unknown command: ${action}.\n` : ""}${scriptUsage}\nRun node scripts/victor/fork.mjs --help to list commands.`,
-        );
-    }
-
-    const [recipe, description] = help[action];
-    const usage = `Usage: just ${recipe}`;
     const noArguments = action === "status" || action === "check";
 
-    if (wantsHelp) {
-        console.log(`${usage}\n\n${description}`);
-
-        if (!noArguments) {
-            console.log(
-                "\nRequires confirmation and a clean development checkout, not the serving checkout.\nSee docs/fork-workflow.md for prerequisites and merge rules.",
-            );
-        }
-
-        console.log("\nOptions:\n  -h, --help  Show this help.\n\nRun `just` to list all recipes.");
-        process.exit(0);
-    }
-
     if (
+        !Object.hasOwn(actions, action ?? "") ||
         extra.length ||
         (argument !== undefined && noArguments) ||
         (argument === undefined && !noArguments && action !== "pr")
     ) {
-        const count = noArguments
-            ? "no arguments"
-            : action === "pr"
-              ? "at most one argument"
-              : "one argument";
-
-        throw new Error(`${recipe.split(" ")[0]} takes ${count}.\n${usage}`);
+        throw new Error(
+            "Usage: node scripts/victor/fork.mjs status|check|feature SLUG|upstream-update NAME|pr [DESCRIPTION]|release VERSION",
+        );
     }
 
     process.chdir(git("rev-parse", "--show-toplevel"));

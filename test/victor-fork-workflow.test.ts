@@ -403,79 +403,24 @@ function assertNoPublish(calls: string[][]) {
     );
 }
 
-test("help works outside a repository without Git or other commands available", (t) => {
-    const cwd = mkdtempSync(join(tmpdir(), "fork-help-"));
-
-    t.after(() => rmSync(cwd, { recursive: true, force: true }));
-
-    for (const flag of ["--help", "-h"]) {
-        for (const args of [
-            [],
-            ["status"],
-            ["check"],
-            ["feature"],
-            ["upstream-update"],
-            ["pr"],
-            ["release"],
-            ["feature", "voice-fix"],
-            ["pr", "fix voice playback"],
-            ["release", "1.2.3"],
-        ]) {
-            const result = spawnSync(process.execPath, [helper, ...args, flag], {
-                cwd,
-                env: { ...process.env, PATH: "" },
-                encoding: "utf8",
-                timeout: 10_000,
-            });
-
-            assert.ifError(result.error);
-            assert.equal(result.status, 0, result.stdout + result.stderr);
-
-            if (args.length === 0) {
-                assert.match(result.stdout, /Usage:.*fork\.mjs COMMAND/);
-                assert.match(result.stdout, /pr \[DESCRIPTION\]/);
-                assert.match(result.stdout, /status.*just repo-status/);
-            } else {
-                const recipe = args[0] === "status" ? "repo-status" : args[0];
-
-                assert.ok(result.stdout.startsWith(`Usage: just ${recipe}`), result.stdout);
-                assert.match(result.stdout, /Run `just` to list all recipes/);
-                assert.doesNotMatch(result.stdout, /COMMAND \[ARGUMENT\]/);
-
-                if (args[0] === "check") {
-                    assert.match(result.stdout, /^Usage: just check\n/);
-                    assert.match(result.stdout, /Does not format files or change Git state/);
-                    assert.doesNotMatch(result.stdout, /confirmation|status|release/);
-                }
-            }
-
-            assert.equal(result.stderr, "");
-        }
-    }
-});
-
-test("argument errors show only the affected recipe's usage before running Git", (t) => {
+test("fork script rejects unknown commands and invalid argument counts before running Git", (t) => {
     const cwd = mkdtempSync(join(tmpdir(), "fork-usage-"));
 
     t.after(() => rmSync(cwd, { recursive: true, force: true }));
 
-    for (const [args, message] of [
-        [["check", "status"], "check takes no arguments.\nUsage: just check"],
-        [["status", "extra"], "repo-status takes no arguments.\nUsage: just repo-status"],
-        [["feature"], "feature takes one argument.\nUsage: just feature SLUG"],
-        [
-            ["upstream-update"],
-            "upstream-update takes one argument.\nUsage: just upstream-update NAME",
-        ],
-        [["release"], "release takes one argument.\nUsage: just release X.Y.Z"],
-        [["feature", "one", "two"], "feature takes one argument.\nUsage: just feature SLUG"],
-        [
-            ["upstream-update", "one", "two"],
-            "upstream-update takes one argument.\nUsage: just upstream-update NAME",
-        ],
-        [["pr", "one", "two"], "pr takes at most one argument.\nUsage: just pr [DESCRIPTION]"],
-        [["release", "1.2.3", "extra"], "release takes one argument.\nUsage: just release X.Y.Z"],
-    ] as const) {
+    for (const args of [
+        [],
+        ["unknown"],
+        ["check", "status"],
+        ["status", "extra"],
+        ["feature"],
+        ["upstream-update"],
+        ["release"],
+        ["feature", "one", "two"],
+        ["upstream-update", "one", "two"],
+        ["pr", "one", "two"],
+        ["release", "1.2.3", "extra"],
+    ]) {
         const result = spawnSync(process.execPath, [helper, ...args], {
             cwd,
             env: { ...process.env, PATH: "" },
@@ -486,7 +431,7 @@ test("argument errors show only the affected recipe's usage before running Git",
         assert.ifError(result.error);
         assert.equal(result.status, 1);
         assert.equal(result.stdout, "");
-        assert.equal(result.stderr, `fork: ${message}\n`);
+        assert.match(result.stderr, /^fork: Usage:/);
     }
 });
 
