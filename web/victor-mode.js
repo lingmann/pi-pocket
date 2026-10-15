@@ -606,6 +606,7 @@ async function submitFinal(text) {
             text,
             requestId: attempt.requestId,
             mode: "followUp",
+            inputSource: "victor",
             attachments: [],
             inlineFiles: false,
         });

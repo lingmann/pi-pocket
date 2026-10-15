@@ -62,6 +62,16 @@ export const AuthorsDoc = defineDoc<{
     initial: () => ({ requests: {}, entries: {} }),
 });
 
+/** Immutable input sources by canonical request ID; retained for the same lifetime as submission deduplication. */
+export const VictorInputsDoc = defineDoc<{ sources: Record<string, "victor" | "text"> }>({
+    kind: "pocket.victor-inputs",
+    version: 1,
+    scope: "conversation",
+    history: "latest",
+    fork: "initial",
+    initial: () => ({ sources: {} }),
+});
+
 export type ArtifactType = "html" | "markdown" | "svg";
 
 export type ArtifactVersion = {
