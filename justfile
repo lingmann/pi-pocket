@@ -25,7 +25,7 @@ start-local: prepare-victor
 dev: prepare-victor
     @printf '\n\033[1;31m  WARNING: Use a unique browser profile\033[0m\n\033[31m  Cookies are shared across ports on the same host.\n  Signing in here can sign you out of another Pi Pocket instance.\033[0m\n\n' >&2
     @"$TAILSCALE_BIN" serve --bg --https=8444 http://127.0.0.1:8788
-    @PI_CODING_AGENT_DIR="$HOME/.pi-pocket-dev/agent" npm start -- --access local --host 127.0.0.1 --port 8788 --data "$HOME/.pi-pocket-dev" --cwd "${PI_POCKET_CWD:-$PWD}"
+    @npm start -- --access local --host 127.0.0.1 --port 8788 --data "$HOME/.pi-pocket-dev" --cwd "${PI_POCKET_CWD:-$PWD}"
 
 # Enable Pi Pocket's Tailscale HTTPS proxy.
 [group('tailscale')]
