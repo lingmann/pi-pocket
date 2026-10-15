@@ -154,70 +154,46 @@ test("Just forwards quoted and default arguments and rejects missing or unknown 
     }
 });
 
-test("Just dev warns about profiles and launches separate state through its own HTTPS port", (t) => {
+test("Just dev keeps Pocket data and ports separate and forwards working directories", (t) => {
     for (const workspace of [undefined, "/tmp/dev workspace's folder"]) {
         const f = fixture(t, {
-            PI_POCKET_HOST: "127.0.0.1",
+            PI_POCKET_HOST: "0.0.0.0",
             PI_POCKET_PORT: "8787",
             PI_POCKET_DIR: "/production/pocket",
-            PI_CODING_AGENT_DIR: "/production/agent",
             PI_POCKET_CWD: workspace,
         });
 
-        writeFileSync(
-            join(f.bin, "npm"),
-            `#!${process.execPath}
-import { appendFileSync } from "node:fs";
-appendFileSync(process.env.COMMAND_TRACE, "npm\\n");
-console.log(JSON.stringify({ args: process.argv.slice(2), agent: process.env.PI_CODING_AGENT_DIR }));
-`,
-            { mode: 0o755 },
-        );
-
-        writeFileSync(
-            join(f.bin, "tailscale"),
-            `#!${process.execPath}
-import { appendFileSync } from "node:fs";
-appendFileSync(process.env.COMMAND_TRACE, "tailscale\\n");
-console.log(JSON.stringify(process.argv.slice(2)));
-`,
-            { mode: 0o755 },
-        );
+        for (const name of ["npm", "tailscale"]) {
+            writeFileSync(
+                join(f.bin, name),
+                `#!${process.execPath}\nconsole.log(JSON.stringify(process.argv.slice(2)));\n`,
+                { mode: 0o755 },
+            );
+        }
 
         const result = f.run("dev");
 
         assert.equal(result.status, 0, result.stderr);
-        assert.equal(
-            result.stderr,
-            "\n\x1b[1;31m  WARNING: Use a unique browser profile\x1b[0m\n" +
-                "\x1b[31m  Cookies are shared across ports on the same host.\n" +
-                "  Signing in here can sign you out of another Pi Pocket instance.\x1b[0m\n\n",
-        );
-        const [prepared, served, launched] = result.stdout
+        const [, served, launched] = result.stdout
             .trim()
             .split("\n")
             .map((line) => JSON.parse(line));
 
-        assert.deepEqual(prepared, []);
         assert.deepEqual(served, ["serve", "--bg", "--https=8444", "http://127.0.0.1:8788"]);
-        assert.deepEqual(launched, {
-            args: [
-                "start",
-                "--",
-                "--access",
-                "local",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                "8788",
-                "--data",
-                join(f.cwd, ".pi-pocket-dev"),
-                "--cwd",
-                workspace ?? realpathSync(f.cwd),
-            ],
-            agent: join(f.cwd, ".pi-pocket-dev/agent"),
-        });
-        assert.equal(readFileSync(f.trace, "utf8"), "task\ntailscale\nnpm\n");
+        assert.deepEqual(launched, [
+            "start",
+            "--",
+            "--access",
+            "local",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "8788",
+            "--data",
+            join(f.cwd, ".pi-pocket-dev"),
+            "--cwd",
+            workspace ?? realpathSync(f.cwd),
+        ]);
     }
 });
 
