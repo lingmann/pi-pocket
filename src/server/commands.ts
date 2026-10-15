@@ -42,6 +42,7 @@ import {
     STOPPED,
     type SubagentRecord,
     SubagentsDoc,
+    VictorInputsDoc,
 } from "./docs.ts";
 import { ATTACHMENTS_HEADING, FILE_BLOCK, FROM_PREFIX, NOTE_ENTRY } from "./entry-format.ts";
 import { describe, HttpError, optionalText } from "./errors.ts";
@@ -78,6 +79,8 @@ export interface SubmitRequest {
     requestId: string;
     /** Send the files the message mentions with `@` along with it, so Pi need not read them first. */
     inlineFiles?: boolean;
+    /** Victor voice input; omitted for ordinary typing and dictation. Never contains prompt text. */
+    inputSource?: "victor";
 }
 
 /** Attached images that also go to the model itself, when it takes images. */
@@ -670,6 +673,16 @@ export class Commands {
             throw new HttpError(409, "PiP is turned off in Extensions.");
         }
 
+        if (
+            request.inputSource !== undefined &&
+            (request.inputSource !== "victor" || via !== undefined)
+        ) {
+            throw new HttpError(
+                400,
+                "inputSource must be omitted or victor on a direct submission",
+            );
+        }
+
         const conversation = await app.conversation(id);
         const typed = request.text.trim();
         // `/skill:name request` sends the skill with the request; `/name arguments`, Pi's prompt template of that name.
@@ -735,6 +748,23 @@ export class Commands {
                 : requestFor(user.id, clientKey(request.requestId));
         // A failed subagent's failure as the person writes to it: what their message comes to settles it.
         const failure = await this.#failureOf(id);
+        const source = request.inputSource ?? "text";
+
+        // Record before admission: generation can start as soon as submit returns. A conflicting retry must never
+        // change the style of an accepted or queued input. A crash here leaves only an inert request-keyed record.
+        await conversation.commit(async (tx) => {
+            const existing = await tx.submissionByRequest(id, requestId);
+            const inputs = await tx.doc(VictorInputsDoc, id);
+            const original =
+                inputs.sources[requestId] ?? (existing === undefined ? undefined : "text");
+
+            if (original !== undefined && original !== source) {
+                throw new HttpError(409, "This request ID already has a different input source");
+            }
+
+            inputs.sources[requestId] ??= source;
+        }, context);
+
         const submission = await conversation.submit(
             {
                 type: "input",

@@ -163,7 +163,11 @@ Plain ES modules, served as they are, with no build. Editing a file under `web/`
 
 ### Browser-local Victor
 
-Victor runs recognition and speech in the foreground browser; only recognized text uses the normal submission API. Stopping Victor releases local audio but never aborts Pi's shared run. Missing or invalid prepared assets affect only Victor requests, not ordinary app startup.
+Victor runs recognition and speech in the foreground browser; recognized text uses the normal submission API with `inputSource: "victor"`. Commands validates that optional enum after access checks and stores the source in `VictorInputsDoc`, keyed by canonical request ID, before admission. Ordinary typing and dictation omit the field. Source decisions are immutable; conflicting retries return 409. Existing submissions without metadata remain ordinary inputs. The metadata commit precedes admission so a generation never races its source; a crash between commits leaves only an unused request-keyed record. Records remain for the conversation's lifetime, and forks start with an empty document.
+
+The `pocket-victor-reply-style` extension renders fixed voice or normal guidance from the newest input in `LiveDoc.run.inputs`. Its section reads the source document and resolves the input through the narrow `PocketHost.submissionRequestId` helper. Queued inputs do not affect the current run; tool rounds and restart recovery retain the active source. An untagged background input uses normal style. Lookup errors explicitly fall back to normal guidance because a throwing section renderer would retain its old text. The extension is on by default and owner-switchable.
+
+Stopping Victor releases local audio but never aborts Pi's shared run or changes the accepted input's source. Missing or invalid prepared assets affect only Victor requests, not ordinary app startup.
 
 See [victor.md](victor.md) for setup, use, updates, and troubleshooting. Implementation details live in the Victor source and tests.
 

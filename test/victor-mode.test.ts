@@ -78,6 +78,7 @@ type Submission = {
     text: string;
     requestId: string;
     mode: string;
+    inputSource?: string;
     attachments: unknown[];
     inlineFiles: boolean;
 };
@@ -432,6 +433,7 @@ class Harness {
 
     async api(path: string, body: Submission) {
         assert.equal(path, "c/session/submit", "victor must never call Pi's abort endpoint");
+        assert.equal(body.inputSource, "victor", "every Victor submission tags its input source");
         this.submissions.push({ path, body });
     }
 
@@ -1084,7 +1086,10 @@ test("two turns share one worker/context, submit once, and snapshot speed for th
     assert.ok(
         h.submissions.every(
             ({ body }) =>
-                body.mode === "followUp" && !body.inlineFiles && body.attachments.length === 0,
+                body.mode === "followUp" &&
+                body.inputSource === "victor" &&
+                !body.inlineFiles &&
+                body.attachments.length === 0,
         ),
     );
 });
@@ -1274,6 +1279,11 @@ test("an old activation cannot affect a newly enabled worker or playback", async
     assert.equal(h.victor.state.phase, "speaking");
     assert.equal(h.acquisitions.length, captures);
     assert.equal(h.submissions.length, 2);
+    assert.deepEqual(
+        h.submissions.map(({ body }) => body.inputSource),
+        ["victor", "victor"],
+        "disabling and re-enabling Victor preserves per-submission source tagging",
+    );
 });
 
 test("a synthesis error resumes listening and permits retry with the draft intact", async (t) => {

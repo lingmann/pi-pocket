@@ -411,6 +411,11 @@ export class PocketApp {
             subagentModels: () => this.config.subagentModels,
             modelProblem: (ref, fresh) => this.providers.problem(ref, fresh),
             requesterOf: (conversationId) => this.attribution.requesterOf(conversationId),
+            submissionRequestId: async (submissionId, context) => {
+                const submission = await this.harness.submission(submissionId, context);
+
+                return (await submission?.status(context))?.requestId;
+            },
             notice: (level, message, conversationId) => this.notice(level, message, conversationId),
             heldBack: (conversationId) => this.spend.heldBack(conversationId),
             onLimitsChanged: (listener) => this.spend.onLimitsChanged(listener),
