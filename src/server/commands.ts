@@ -55,6 +55,7 @@ import { clientKey, ownRequest, requestFor } from "./requests.ts";
 import { type Resend, resendContent, resendRequest, ResendTask, userContent } from "./resend.ts";
 import { whyUnanswered } from "./subagent-runs.ts";
 import { wantsTitle, writeTitle } from "./titles.ts";
+import { recordInputSource } from "./victor-replies.ts";
 import { describeMoment, describeRepeat, knownZone } from "./when.ts";
 import {
     createWorktree,
@@ -78,6 +79,8 @@ export interface SubmitRequest {
     requestId: string;
     /** Send the files the message mentions with `@` along with it, so Pi need not read them first. */
     inlineFiles?: boolean;
+    /** Victor requests conversational replies for this input; omission means ordinary text chat. */
+    source?: "victor";
 }
 
 /** Attached images that also go to the model itself, when it takes images. */
@@ -664,6 +667,19 @@ export class Commands {
         app.requireSee(user, id);
         await app.requireDriver(id, user);
 
+        if (request.source !== undefined && request.source !== "victor") {
+            throw new HttpError(400, "source must be victor when supplied");
+        }
+
+        if (
+            request.source === "victor" &&
+            (via !== undefined ||
+                app.parentOf(id) !== undefined ||
+                app.pip.ownerOf(id) !== undefined)
+        ) {
+            throw new HttpError(400, "Victor input is available in main sessions only.");
+        }
+
         // PiP turned off takes nothing, from its person either: it would run without its rules, and be compacted without
         // its own summary (`pip-compact.ts`). What else goes to it (reports, schedules, watches) waits meanwhile.
         if (app.pip.ownerOf(id) !== undefined && !app.pip.available(user)) {
@@ -735,6 +751,9 @@ export class Commands {
                 : requestFor(user.id, clientKey(request.requestId));
         // A failed subagent's failure as the person writes to it: what their message comes to settles it.
         const failure = await this.#failureOf(id);
+
+        await recordInputSource(app, id, requestId, request.source ?? "text", context);
+
         const submission = await conversation.submit(
             {
                 type: "input",

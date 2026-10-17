@@ -605,6 +605,7 @@ async function submitFinal(text) {
         await api(`c/${attempt.id}/submit`, {
             text,
             requestId: attempt.requestId,
+            source: "victor",
             mode: "followUp",
             attachments: [],
             inlineFiles: false,

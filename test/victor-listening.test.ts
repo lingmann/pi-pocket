@@ -280,6 +280,7 @@ test("Victor listens beyond one minute and through silence until send it submits
             body: {
                 text: "Keep listening",
                 requestId: "victor-request",
+                source: "victor",
                 mode: "followUp",
                 attachments: [],
                 inlineFiles: false,
