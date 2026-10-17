@@ -12,6 +12,10 @@ Keep all Victor and fork-maintenance scripts under `scripts/victor/` so they rem
 
 Keep Victor fork-specific tests directly under `test/` and name them `victor-<behavior>.test.ts`, including fork-maintenance tests (for example, `victor-fork-workflow.test.ts`). This keeps them distinct from upstream tests and included in automatic Victor test discovery.
 
+## Upstream workflow review
+
+Review the incoming workflow summary and diff printed by `just upstream-update` before merging. The fork's `Pages` workflow (`pages.yml`) is intentionally disabled through GitHub settings; prefer keeping upstream YAML unchanged when a workflow can simply remain disabled on the fork.
+
 ## Just recipes and scripts
 
 Use **recipe** for a named entry in `justfile`, **command** for a shell invocation, and **script** for the implementation a recipe calls, such as `scripts/victor/fork.mjs`. Do not use “task” or “target” as synonyms for a Just recipe. Name the responsible layer when explaining argument parsing, validation, or errors.
