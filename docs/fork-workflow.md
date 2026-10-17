@@ -52,14 +52,14 @@ Prefer running one recipe per command. Just rejects unknown recipe names and mis
 
 ## Daily use
 
-| Command                            | Effect                                                                                                |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `just repo-status`                  | Fetch upstream main; show incoming updates, recent fork history, and staged/unstaged/untracked changes. |
-| `just feature voice-fix`           | Fetch fork main and create `$USER/voice-fix` from it.                                                 |
-| `just pr "fix voice playback"`     | Push the current branch and open PR with prefix: `fork: fix voice playback`. |
-| `just check`                       | Run TypeScript and focused Victor/shared/tooling tests.                                               |
-| `just upstream-update v0.13.3`     | Fetch both mains; create `sync/upstream-v0.13.3` from `origin/main` and merge `upstream/main`.        |
-| `just release 0.1.0`               | Tag and push only `victor/v0.1.0`, requiring main to match freshly fetched `origin/main`.             |
+| Command                        | Effect                                                                                                  |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `just repo-status`             | Fetch upstream main; show incoming updates, recent fork history, and staged/unstaged/untracked changes. |
+| `just feature voice-fix`       | Fetch fork main and create `$USER/voice-fix` from it.                                                   |
+| `just pr "fix voice playback"` | Push the current branch and open PR with prefix: `fork: fix voice playback`.                            |
+| `just check`                   | Run TypeScript and focused Victor/shared/tooling tests.                                                 |
+| `just upstream-update v0.13.3` | Fetch both mains; create `sync/upstream-v0.13.3` from `origin/main` and merge `upstream/main`.          |
+| `just release 0.1.0`           | Tag and push only `victor/v0.1.0`, requiring main to match freshly fetched `origin/main`.               |
 
 Start features with `just feature <slug>` before editing. It creates `$USER/<slug>` from freshly fetched `origin/main`, leaving local `main` unchanged. Override the namespace with, for example, `USER=alice just feature voice-fix`.
 
@@ -67,7 +67,7 @@ Start features with `just feature <slug>` before editing. It creates `$USER/<slu
 
 `just pr` requires an authenticated GitHub CLI (`gh auth login`), a clean non-main branch with at least one commit beyond `origin/main`, and `origin` fetch/push URLs pointing to `lingmann/pi-pocket`. It fetches `origin/main`, requires the branch to include it, and never force-pushes, merges, or publishes tags.
 
-Rerunning is safe: if the fork already has an open PR for the branch, `just pr` prints its URL without pushing or changing the title. After the first push, add reviewed commits with `git push --no-follow-tags origin HEAD` and edit the title on GitHub. If the push succeeded but PR creation failed, rerun `just pr`; it checks for an existing PR first. An upstream-update title comes from the first import merge's second parent, so later commits and a moving `upstream/main` do not change it; a description becomes the PR body.
+Rerunning is safe: if the fork already has an open PR for the branch, `just pr` prints its URL without pushing or changing the title. After a successful publication push, `just pr` configures the local branch to track the same-named branch on `origin`, even if PR creation later fails. Add reviewed commits with `git push --no-follow-tags` and edit the title on GitHub. If the push succeeded but PR creation failed, rerun `just pr`; it checks for an existing PR first. An upstream-update title comes from the first import merge's second parent, so later commits and a moving `upstream/main` do not change it; a description becomes the PR body.
 
 You can still open PRs manually; give them the prefix above and target the fork's `main`.
 

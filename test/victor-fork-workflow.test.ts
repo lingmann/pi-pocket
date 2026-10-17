@@ -1195,6 +1195,8 @@ test("PR publication pins only the feature branch and uses explicit fork metadat
 
     success(result);
     assert.equal(f.gitAt(f.origin, "rev-parse", "refs/heads/feature/voice"), head);
+    assert.equal(f.git("config", "branch.feature/voice.remote"), "origin");
+    assert.equal(f.git("config", "branch.feature/voice.merge"), "refs/heads/feature/voice");
     assert.equal(f.gitAt(f.origin, "rev-parse", "main"), f.fork);
     assert.equal(f.refs(f.origin, "refs/tags"), "");
     assert.deepEqual(ghCalls().at(-1), [
@@ -1375,6 +1377,8 @@ test("a failed PR create preserves the published branch and retries without dupl
     failure(result);
     assert.match(result.output, /was pushed.*Retry just pr/s);
     assert.equal(f.gitAt(f.origin, "rev-parse", "feature/retry"), f.head());
+    assert.equal(f.git("config", "branch.feature/retry.remote"), "origin");
+    assert.equal(f.git("config", "branch.feature/retry.merge"), "refs/heads/feature/retry");
     delete f.env.FORK_TEST_CREATE_FAIL;
     f.env.FORK_TEST_EXISTING_PR = existingForkPR;
     success(f.run("pr", "retry safely"));
