@@ -1,6 +1,7 @@
 // The open sheet: which component shows it. The sheets themselves are in web/sheets/, and a few beside their features
 // (chat.js, notify.js, share.js).
 import { ChatSheet } from "./chat.js";
+import { ExtensionSheet, onExtensionsGone } from "./extension-ui.js";
 import { NotificationsSheet } from "./notify.js";
 import { ShareSheet } from "./share.js";
 import { AppearanceSheet } from "./sheets/appearance.js";
@@ -8,6 +9,14 @@ import { BranchPicker } from "./sheets/branch.js";
 import { ExtensionsSheet } from "./sheets/extensions.js";
 import { FileSheet } from "./sheets/file.js";
 import { FindSheet } from "./sheets/find.js";
+import {
+    galleryAvailable,
+    GalleryEntrySheet,
+    GalleryShareSheet,
+    GallerySheet,
+    GallerySourceSheet,
+    GalleryUpdateSheet,
+} from "./sheets/gallery.js";
 import { CwdSheet } from "./sheets/folder.js";
 import { MemorySheet } from "./sheets/memory.js";
 import { MenuSheet, PlacesSheet } from "./sheets/menu.js";
@@ -26,9 +35,9 @@ import { ArtifactsSheet, ArtifactViewer, ImageViewer } from "./sheets/viewers.js
 import { PiSessionSheet, PiSessionsSheet, piSessionsAvailable } from "./sheets/pi-sessions.js";
 import { WorktreeSheet } from "./sheets/worktree.js";
 import { TrustSheet } from "./trust.js";
-import { addLayer, removeLayer } from "./back.js";
-import { actions, api, store } from "./store.js";
-import { Boundary, html, usePresence } from "./ui.js";
+import { addLayer, goBack, removeLayer } from "./back.js";
+import { actions, api, signOut, store } from "./store.js";
+import { Boundary, html, Icon, SheetBack, SheetInfo, usePresence } from "./ui.js";
 
 // ─── Back ─────────────────────────────────────────────────────────────────────────
 
@@ -84,22 +93,77 @@ store.subscribe(({ sheet, conversationId }) => {
     trail.push(step);
 });
 
+// A module turned off: its sheets under the one open come out of the trail, with their steps back, so back never shows
+// one of a module that is gone. Its sheet that is open closes (`extension-ui.js`), and the whole trail with it.
+onExtensionsGone((gone) => {
+    const went = trail.filter((each) => each.sheet.type === "ext" && gone(each.sheet.module));
+
+    for (const step of went) {
+        trail.splice(trail.indexOf(step), 1);
+        removeLayer(step.layer);
+    }
+});
+
+// ─── Focus ────────────────────────────────────────────────────────────────────────
+
+/** What had focus when a sheet opened over the app: it has it again when the last sheet closes. */
+let opener = null;
+/** What last had focus outside the sheets and the launcher: a sheet the launcher opens goes back there. */
+let lastFocus = null;
+
+addEventListener("focusin", (event) => {
+    if (!event.target.closest?.(".sheet-host, .launcher-overlay")) {
+        lastFocus = event.target;
+    }
+});
+
+store.subscribe(({ sheet, launcher }) => {
+    if (sheet && !opener) {
+        const active = document.activeElement;
+
+        opener = active?.closest(".launcher-overlay") ? lastFocus : active;
+    } else if (!sheet && opener) {
+        const back = opener;
+        const active = document.activeElement;
+
+        opener = null;
+
+        // Unless something else took focus meanwhile (a session the sheet opened), or a phone's keyboard would pop up.
+        if (
+            (active === null || active === document.body || active.closest(".sheet-host")) &&
+            !launcher &&
+            back.isConnected &&
+            !back.closest(".sheet-host") &&
+            !(
+                matchMedia("(pointer: coarse)").matches &&
+                back.matches("input, textarea, [contenteditable]")
+            )
+        ) {
+            back.focus({ preventScroll: true });
+        }
+    }
+});
+
 /**
  * The open sheet, if any. A sheet that closes stays a moment longer, marked as leaving, so it can animate out; one sheet
  * replacing another swaps at once.
  */
 export function Sheets() {
     const [sheet, leaving] = usePresence(store.state.sheet, 200);
-    const auth = store.state.auth ? html`<${AuthDialog} />` : null;
+    const auth = store.state.auth && sheet?.type !== "providers" ? html`<${AuthDialog} />` : null;
 
     if (!sheet) {
         return auth;
     }
 
-    const key = `${sheet.type}:${sheet.entryId ?? sheet.id ?? ""}`;
+    const key = `${sheet.type}:${sheet.entryId ?? sheet.id ?? sheet.pipId ?? ""}`;
 
     return html`<div class=${`sheet-host ${leaving ? "leaving" : ""}`} inert=${leaving}>
-        <${Boundary} key=${key} reset=${sheet}>${sheetBody(sheet)}<//>
+        <${SheetBack.Provider} value=${trail.length > 1 ? goBack : null}>
+            <${SheetInfo.Provider} value=${{ type: sheet.type, closing: Boolean(leaving) }}>
+                <${Boundary} key=${key} reset=${sheet}>${sheetBody(sheet)}<//>
+            <//>
+        <//>
     </div>
     ${auth}`;
 }
@@ -138,6 +202,37 @@ function sheetBody(sheet) {
         case "extensions":
             body = html`<${ExtensionsSheet} />`;
             break;
+        case "gallery":
+            body = galleryAvailable() ? html`<${GallerySheet} />` : null;
+            break;
+        case "gallery-entry":
+            body = galleryAvailable()
+                ? html`<${GalleryEntrySheet} key=${sheet.id} name=${sheet.id} />`
+                : null;
+            break;
+        case "gallery-source":
+            body = galleryAvailable()
+                ? html`<${GallerySourceSheet} key=${sheet.id} name=${sheet.id} />`
+                : null;
+            break;
+        case "gallery-update":
+            body = galleryAvailable()
+                ? html`<${GalleryUpdateSheet} key=${sheet.id} name=${sheet.id} />`
+                : null;
+            break;
+        case "gallery-share":
+            body = galleryAvailable()
+                ? html`<${GalleryShareSheet}
+                      key=${sheet.id}
+                      file=${sheet.id}
+                      theme=${sheet.theme === true}
+                  />`
+                : null;
+            break;
+        // A sheet an extension's browser module added (`extension-ui.js`).
+        case "ext":
+            body = html`<${ExtensionSheet} sheet=${sheet} />`;
+            break;
         case "image":
             body = html`<${ImageViewer} src=${sheet.src} alt=${sheet.alt} />`;
             break;
@@ -151,7 +246,7 @@ function sheetBody(sheet) {
             body = html`<${NotificationsSheet} />`;
             break;
         case "menu":
-            body = html`<${MenuSheet} />`;
+            body = html`<${MenuSheet} places=${!sheet.fromPlaces} />`;
             break;
         case "session":
             body = store.state.sessions.some((each) => each.id === sheet.id)
@@ -209,7 +304,14 @@ function sheetBody(sheet) {
             body = html`<${HooksSheet} />`;
             break;
         case "memory":
-            body = view.conversation ? html`<${MemorySheet} draft=${sheet.draft ?? ""} />` : null;
+            body =
+                sheet.conversationId !== undefined || view.conversation
+                    ? html`<${MemorySheet}
+                          draft=${sheet.draft ?? ""}
+                          conversationId=${sheet.conversationId}
+                          pendingOnly=${sheet.pendingOnly === true}
+                      />`
+                    : null;
             break;
         case "share":
             body = html`<${ShareSheet} share=${sheet.share} />`;
@@ -256,6 +358,9 @@ function sheetBody(sheet) {
                 title="Your name"
                 label="Shown on your messages to others"
                 initial=${me?.name ?? ""}
+                footer=${html`<button class="button ghost wide sheet-footer signout" onClick=${signOut}>
+                    <${Icon} name="logout" size=${16} /> Sign out
+                </button>`}
                 submit=${async (value) => {
                     await api("me", { name: value });
                     const hello = await api("me");

@@ -4,7 +4,8 @@
 // as tiles have), for how long, whether its report is on its way, Stop, and a tap to open it.
 import { useEffect, useRef, useState } from "preact/hooks";
 import { describeCall } from "./calls.js";
-import { fromServer, useOnScreen } from "./peeks.js";
+import { useOnScreen } from "./peeks.js";
+import { fromServer } from "./seen.js";
 import { api, attempt, canSteer, navigate, openSheet, store } from "./store.js";
 import { html, Icon, Spinner, timeAgo } from "./ui.js";
 
@@ -223,6 +224,7 @@ function Bar({ agents, active, open, held }) {
 
     return html`<div
         class=${`agents-bar ${open ? "open" : ""} ${working.length > 0 ? "busy" : ""}`}
+        data-part="subagents-bar"
         ref=${box}
     >
         <div class="agents-top">

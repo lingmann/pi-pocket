@@ -14,6 +14,7 @@ import { clampThinkingLevel, type ModelThinkingLevel } from "@earendil-works/pi-
 import {
     getAgentDir,
     ModelRuntime,
+    resolveModelScopeWithDiagnostics,
     SettingsManager,
     type Skill,
 } from "@earendil-works/pi-coding-agent";
@@ -45,6 +46,7 @@ import { Browsers } from "./browser.ts";
 import type { BrowserState } from "./browser/page.ts";
 import { Collab, REACTIONS } from "./collab.ts";
 import { Commands } from "./commands.ts";
+import { LinkedSessions } from "./linked-sessions.ts";
 import { APP_ROOT, ConfigStore, type User } from "./config.ts";
 import {
     ArtifactBodyDoc,
@@ -55,6 +57,7 @@ import {
     ChatDoc,
     type ChatMessage,
     DecisionsDoc,
+    FolderFavoritesDoc,
     MemoryDoc,
     type SessionMeta,
     SessionsDoc,
@@ -63,8 +66,13 @@ import {
     TurnsDoc,
 } from "./docs.ts";
 import { describe, HttpError } from "./errors.ts";
+import { ExtensionCommands } from "./extension-commands.ts";
+import { ExtensionWebs, mayUse } from "./extension-web.ts";
+import { defang, quoted } from "./fence.ts";
+import { FolderFavorites } from "./folder-favorites.ts";
+import { Gallery } from "./gallery.ts";
 import { Goals } from "./goals.ts";
-import { type ApprovalRequest, Approvals, type PocketHost } from "./host.ts";
+import { type ApprovalRequest, Approvals, type PocketHost, type WebAccess } from "./host.ts";
 import { victorReplyMode } from "./victor-replies.ts";
 import { type GuardStatus, LancetGuard } from "./lancet.ts";
 import { takeLock } from "./lock.ts";
@@ -78,10 +86,12 @@ import { PIP_COMPACT_CHOICES, PipCompaction } from "./pip-compact.ts";
 import { RepoWatches } from "./repo-watches.ts";
 import { snippet } from "./projection.ts";
 import { loadPromptTemplates, type PromptTemplate, type SkillCommand } from "./prompts.ts";
+import { BASE_THEME, Themes } from "./themes.ts";
+import { THEME_ID } from "./themes/format.ts";
 import { measureModelStreams } from "./timing.ts";
 import { Providers } from "./providers.ts";
 import { PushStore } from "./push.ts";
-import { type ExtensionInfo, ExtensionLoader, prepareDropInFolder } from "./reload.ts";
+import { type ExtensionInfo, ExtensionLoader, linkTypes, prepareDropInFolder } from "./reload.ts";
 import { ResendTask } from "./resend.ts";
 import { type Client, reportingOf, Room, ROOM_DOCS, subagentView } from "./room.ts";
 import { Schedules } from "./schedules.ts";
@@ -112,6 +122,8 @@ export type AccessInfo = {
 
 /** The extension module that runs Lancet Guard on tool calls. */
 const GUARD_FILE = "guard.ts";
+/** How long the server waits, when it stops, for extension modules' cleanups that wait. */
+const CLEANUP_LIMIT_MS = 3000;
 /** The extension module with the browser tool. While it is off, the Browser panel is off too. */
 const BROWSER_FILE = "browser.ts";
 const BROWSER_EXTENSION = "pocket-browser";
@@ -124,6 +136,11 @@ const MAX_SUBAGENT_MODELS = 50;
 
 /** The most peek tiles a tab gets live at once: the ones on its screen, which a tall screen fits a handful of. */
 export const MAX_PEEKS = 12;
+/**
+ * How a run that failed leaves its messages: the model or its provider answered with an error, no model was there to
+ * ask, or the run broke. Stopped (`aborted`), cleared (`reset`), and replaced (`stale`) runs did not fail.
+ */
+const FAILED_RUN = new Set(["model_error", "no_model", "faulted"]);
 
 /** A conversation's subagents document, as far as the app reads it. */
 type SubagentsValue = {
@@ -240,10 +257,10 @@ export class PocketApp {
     harness!: Harness;
     models!: ModelRuntime;
     settings!: SettingsManager;
-    /** What extension modules get (`PocketHost`): kept for tests that stand in for an older server's. */
-    host!: PocketHost;
     loader!: ExtensionLoader;
     readonly commands = new Commands(this);
+    readonly extensionCommands = new ExtensionCommands(this);
+    readonly linkedSessions = new LinkedSessions(this);
     readonly collab = new Collab(this);
     readonly alerts = new Alerts(this);
     readonly providers = new Providers(this);
@@ -271,14 +288,32 @@ export class PocketApp {
     readonly hooks = new Hooks(this);
     /** Lessons Pi keeps across sessions, for a project or everywhere. */
     readonly memory = new Memory(this);
+    /** Each person's favorite working folders, shared by their devices. */
+    readonly folderFavorites = new FolderFavorites(this);
+    /** Other people's drop-ins, from a reviewed index: found, installed off, read, updated, removed (`gallery.ts`). */
+    readonly gallery = new Gallery(this);
+    /** Theme folders: the app's look and layout, built in and the owner's (`themes.ts`). */
+    readonly themes: Themes;
     /** Each conversation's browser page, which Pi and the people in the conversation share. */
     readonly browsers: Browsers;
+    /** What extension modules add to the app: their routes, browser modules, and events (`extension-web.ts`). */
+    readonly webs: ExtensionWebs;
+    #websTimer: NodeJS.Timeout | undefined;
+    /** Whose tabs the next `hello` for browser modules goes to: those who may use any of these. */
+    readonly #websFor = new Set<WebAccess>();
+    /** Whether everyone's tabs must hear `hello` again, for a change to the modules' commands. */
+    #websAll = false;
     readonly #clients = new Set<Client>();
     readonly #rooms = new Map<ConversationId, Promise<Room>>();
     readonly #envs = new Map<string, NodeExecutionEnv>();
     readonly #busy = new Set<ConversationId>();
     /** When each conversation's last run ended, since this server started: peek tiles show sessions done since a look. */
     readonly #endedAt = new Map<ConversationId, number>();
+    /**
+     * Conversations whose last run ended because the model or provider failed (not stopped by someone), since this
+     * server started: the session list marks them until their next run starts.
+     */
+    readonly #failed = new Set<ConversationId>();
     readonly #agents = new Map<ConversationId, AgentState>();
 
     /** The newest chat message (not activity) of each conversation, for unread dots in the session list. */
@@ -345,6 +380,75 @@ export class PocketApp {
                     );
             },
         });
+        this.themes = new Themes({
+            builtIn: join(APP_ROOT, "web", "themes"),
+            dataDir: options.dataDir,
+            notify: (message) => this.ownerNotice("warning", message),
+            // Everyone's tabs: a theme anyone may have chosen changed, or one came or went.
+            changed: () => {
+                const lists = { owner: this.themes.list(true), others: this.themes.list(false) };
+
+                for (const client of this.#clients) {
+                    client.send(
+                        "themes",
+                        client.user.role === "owner" ? lists.owner : lists.others,
+                    );
+                }
+
+                void this.#themeDefaultStillHere();
+            },
+            log: (line) => this.#log(line),
+        });
+        this.webs = new ExtensionWebs({
+            changed: (access) => this.#websChanged(access),
+            deliver: (part, access, event, data, to) => {
+                for (const client of this.#clients) {
+                    if (
+                        (to === undefined || client.user.id === to) &&
+                        mayUse(client.user, access)
+                    ) {
+                        client.send("ext", { module: part.module, event, data });
+                    }
+                }
+            },
+            // Everyone's tabs hear the new list in `hello`: commands are for guests too, not by a browser module's access.
+            commandsChanged: () => this.#websChanged("all"),
+            log: (line) => this.#log(line),
+            // Something about a module only the owner can mend: their tabs, as what it says can name the server's folders.
+            warn: (message) => this.ownerNotice("warning", message),
+        });
+    }
+
+    /**
+     * Browser modules came, went, or changed: the tabs of the people they are for hear which to load, once for changes
+     * that come together.
+     */
+    #websChanged(access: readonly WebAccess[] | "all"): void {
+        if (this.#closing !== undefined) {
+            return;
+        }
+
+        if (access === "all") {
+            this.#websAll = true;
+        } else {
+            for (const each of access) {
+                this.#websFor.add(each);
+            }
+        }
+
+        if (this.#websTimer !== undefined) {
+            return;
+        }
+
+        this.#websTimer = setTimeout(() => {
+            const changed = [...this.#websFor];
+            const all = this.#websAll;
+
+            this.#websTimer = undefined;
+            this.#websFor.clear();
+            this.#websAll = false;
+            void this.#refreshClients((user) => all || changed.some((each) => mayUse(user, each)));
+        }, 50);
     }
 
     /** Write a line to the server log. */
@@ -381,6 +485,7 @@ export class PocketApp {
         }
 
         this.models = await ModelRuntime.create();
+        this.providers.modelRefresh.watch(this.models);
         this.#configureModels?.(this.models);
         measureModelStreams(this.models);
         await this.models.getAvailable().catch(() => []);
@@ -392,7 +497,12 @@ export class PocketApp {
         registry.install(
             defineExtension({
                 name: "pocket-core",
-                tasks: [ResendTask, this.shell.task, this.commands.followTask],
+                tasks: [
+                    ResendTask,
+                    this.shell.task,
+                    this.commands.followTask,
+                    this.extensionCommands.task,
+                ],
             }),
         );
         const host: PocketHost = {
@@ -416,6 +526,7 @@ export class PocketApp {
             notice: (level, message, conversationId) => this.notice(level, message, conversationId),
             heldBack: (conversationId) => this.spend.heldBack(conversationId),
             onLimitsChanged: (listener) => this.spend.onLimitsChanged(listener),
+            linkedSessions: this.linkedSessions,
             schedules: this.schedules,
             goals: this.goals,
             browsers: this.browsers,
@@ -424,9 +535,11 @@ export class PocketApp {
             watches: this.watches,
             repoWatches: this.repoWatches,
             memory: this.memory,
+            gallery: this.gallery,
+            text: Object.freeze({ quoted, defang }),
+            thinkingLevels: THINKING_LEVELS,
         };
 
-        this.host = host;
         this.#registry = registry;
         const dropIn = join(this.dataDir, "extensions");
 
@@ -436,12 +549,29 @@ export class PocketApp {
             this.#log(`Drop-in extensions cannot import Pi Pocket's packages: ${describe(error)}`);
         }
 
+        try {
+            linkTypes(dropIn, join(APP_ROOT, "types", "pocket.d.ts"));
+        } catch (error) {
+            this.#log(`The drop-in folder has no _pocket.d.ts: ${describe(error)}`);
+        }
+
         this.loader = new ExtensionLoader(
             registry,
             host,
             { builtIn: join(APP_ROOT, "src", "server", "extensions"), dropIn },
             (file) => this.config.extensionChoice(file),
+            // What a module's load says can name the server's folders, or quote a provider: the owner's to read.
+            { webs: this.webs, notify: (level, message) => this.ownerNotice(level, message) },
         );
+        await this.themes.load().catch((error: unknown) => {
+            this.#log(`Themes could not be read: ${describe(error)}`);
+        });
+        // A gallery update the server stopped in the middle of goes back first, so no extension loads half of one, and
+        // a theme it had out of its folder is back before the owner's default is checked.
+        await this.gallery.recover().catch((error: unknown) => {
+            this.#log(`The extension gallery could not check its updates: ${describe(error)}`);
+        });
+        await this.#themeDefaultStillHere();
         await this.loader.loadAll();
 
         const storage = await openNodeSqliteStorage(join(this.dataDir, "pocket.sqlite"));
@@ -578,6 +708,17 @@ export class PocketApp {
                 change.conversationId !== undefined
             ) {
                 this.spend.usageChanged(change.conversationId, change.value as UsageState | null);
+
+                // A team's top session with a limit shows the team's spend: it follows a linked session's too.
+                const root = this.rootOf(change.conversationId);
+                const top = this.spend.teamRoot(root);
+
+                if (top !== root && this.#sessions[String(top)]?.budget !== undefined) {
+                    void this.#rooms.get(top)?.then(
+                        (room) => room.schedule(),
+                        () => {},
+                    );
+                }
             }
         }
 
@@ -601,12 +742,43 @@ export class PocketApp {
                         this.providers.runAnswered(provider);
                     }
                 }
+
+                // Its run failed: the commit that settles it ends the run too, so the list hears of both at once.
+                if (
+                    change.value.status === "unanswered" &&
+                    FAILED_RUN.has(change.value.reason) &&
+                    this.#sessions[String(change.value.conversationId)] !== undefined &&
+                    !this.#failed.has(change.value.conversationId)
+                ) {
+                    this.#failed.add(change.value.conversationId);
+                    sessionsChanged = true;
+                }
             }
         }
 
         if (sessionsChanged) {
             this.#scheduleSessions();
         }
+    }
+
+    /**
+     * Pi started work in session `id` at `at`: it moves up the list, as a message sent there does, whatever started it
+     * (a scheduled message, a subagent's report, a message sent again after a restart). One moved up since `at` (a
+     * message through `Commands.submit` moves it too) is left as it is. A commit listener may not commit, so this commits
+     * after it.
+     */
+    #movedUp(id: ConversationId, at: number): void {
+        setImmediate(() => {
+            this.harness
+                .commit(async (tx) => {
+                    const meta = (await tx.doc(SessionsDoc)).items[String(id)];
+
+                    if (meta !== undefined && meta.updatedAt < at) {
+                        meta.updatedAt = Date.now();
+                    }
+                }, context)
+                .catch((error: unknown) => this.log(`session not moved up: ${describe(error)}`));
+        });
     }
 
     /** A document changed: the views that show it update. True when the session list changed too. */
@@ -621,6 +793,12 @@ export class PocketApp {
             if (busy !== this.#busy.has(id)) {
                 if (busy) {
                     this.#busy.add(id);
+                    // A new run starts over: whether it fails is its own to say.
+                    this.#failed.delete(id);
+
+                    if (this.#sessions[String(id)] !== undefined) {
+                        this.#movedUp(id, Date.now());
+                    }
                 } else {
                     this.#busy.delete(id);
                 }
@@ -669,6 +847,10 @@ export class PocketApp {
                     () => {},
                 );
             }
+        } else if (kind === FolderFavoritesDoc.definition.kind) {
+            this.folderFavorites.committed(
+                change.value as { users: Record<string, string[]> } | null,
+            );
         } else if (kind === MemoryDoc.definition.kind) {
             this.memory.committed();
         } else if (ROOM_DOCS.has(kind) && id !== undefined) {
@@ -863,6 +1045,10 @@ export class PocketApp {
         client.send("hello", this.#helloFor(client, hello));
         client.send("sessions", this.sessions(client.user));
         this.#sendPip(client);
+
+        if (client.user.role === "owner" && this.themes.failure !== undefined) {
+            client.send("notice", { level: "warning", message: this.themes.failure });
+        }
 
         if (arriving) {
             this.#peopleChanged(client.user.id);
@@ -1095,6 +1281,8 @@ export class PocketApp {
             get visible() {
                 return tab.visible;
             },
+            // The same code shows it: what the tab understands, the panel does.
+            ...(tab.protocol === undefined ? {} : { protocol: tab.protocol }),
             sentEntries: new Set<number>(),
             orderKey: "",
             // Only the view: the panel has no chat, notes, or browser of its own.
@@ -1508,6 +1696,25 @@ export class PocketApp {
         }
     }
 
+    /** All signed-in models, with Pi's enabledModels scope marked for the picker. */
+    async modelList() {
+        // Pi settings are read from JSON; the SDK expects an array of strings.
+        const configured = this.settings.getEnabledModels();
+        const patterns = Array.isArray(configured)
+            ? configured.filter((pattern): pattern is string => typeof pattern === "string")
+            : [];
+        // The scope asks Pi which models are available, which reads its sign-ins: one that cannot be read leaves the
+        // scope out, as in a picker without one, rather than failing `hello` and with it every tab.
+        const { scopedModels } =
+            patterns.length > 0
+                ? await resolveModelScopeWithDiagnostics(patterns, this.models).catch(() => ({
+                      scopedModels: [],
+                  }))
+                : { scopedModels: [] };
+
+        return modelList(this.models, this.signInNeeded, scopedModels);
+    }
+
     async hello(user: User) {
         return {
             user: {
@@ -1517,7 +1724,7 @@ export class PocketApp {
                 ...(user.sessions === undefined ? {} : { sessions: user.sessions.map(Number) }),
             },
             users: this.people(user),
-            models: modelList(this.models, this.signInNeeded),
+            models: await this.modelList(),
             guard: await this.guardStatus(),
             server: {
                 supervised: this.supervised,
@@ -1525,8 +1732,21 @@ export class PocketApp {
                 home: homedir(),
                 defaultCwd: this.defaultCwd,
                 extensions: this.loader.extensionNames(),
+                // The browser modules this person's tabs load (`extension-ui.js`), each with the tools its module
+                // installs: the only ones whose calls it may describe (`pocket.toolCall`).
+                ui: this.#browserModules(user),
+                // The commands this person may run: viewers none, guests the ones for conversations.
+                extensionCommands: this.webs
+                    .commands()
+                    .filter(
+                        (command) =>
+                            user.role === "owner" ||
+                            (user.role === "guest" && command.scope === "conversation"),
+                    ),
                 // Tells the web app this server has people chat and typing indicators.
                 chat: true,
+                // Manual refresh reloads shared model configuration and catalogs; only the owner may start it.
+                refreshModels: user.role === "owner",
                 // Tells the web app this server sends peek tiles (`POST /api/peeks`, `peek` events).
                 peeks: true,
                 // This server's clock: peek tiles compare the browser's looks with when runs ended here.
@@ -1537,6 +1757,8 @@ export class PocketApp {
                 approvalRule: this.config.approvalRule,
                 // The model and thinking level new sessions start with, or null for the last one picked.
                 defaultModel: this.config.defaultModel ?? null,
+                // The theme and colors of browsers that have not chosen their own, or null for the app's own.
+                themeDefault: this.config.themeDefault ?? null,
                 // The models Pi may start subagents on besides their session's own: the owner's to see and change.
                 ...(user.role === "owner"
                     ? { subagentModels: [...this.config.subagentModels] }
@@ -1546,7 +1768,26 @@ export class PocketApp {
                 // Tokens of context above which PiP compacts itself once idle; 0: only as sessions do.
                 pipCompactAt: this.pipCompaction.compactAt,
             },
+            // Read after the guard's wait, so a connecting device does not replace a live update with an older list.
+            folderFavorites: await this.folderFavorites.list(user),
+            // Every theme folder, for Appearance and for the look this tab uses (`theme.js`).
+            themes: this.themes.list(user.role === "owner"),
         };
+    }
+
+    #browserModules(user: User) {
+        const tools = new Map(
+            this.loader
+                .list()
+                .map((each) => [
+                    each.file.replace(/\.ts$/, ""),
+                    each.extensions.flatMap((extension) => extension.tools),
+                ]),
+        );
+
+        return this.webs
+            .clients(user)
+            .map((each) => ({ ...each, tools: tools.get(each.module) ?? [] }));
     }
 
     /** A tab's hello: what everyone gets, and the id of its own connection, which its peek lists name. */
@@ -1569,9 +1810,8 @@ export class PocketApp {
 
                 client.send(
                     "sessions",
-                    scope === undefined
-                        ? all
-                        : all.filter((session) => scope.includes(String(session.id))),
+                    // Scoped lists need their own metadata projection, not just a filter over the global list.
+                    scope === undefined ? all : this.sessions(client.user),
                 );
                 this.#sendPip(client);
 
@@ -1625,14 +1865,33 @@ export class PocketApp {
                 const endedAt = this.#endedAt.get(Number(id) as unknown as ConversationId);
                 const counts = countSubagents(subagents.get(id) ?? []);
                 // Which of Pi's sessions it continues is the owner's to know (the Pi sessions sheet), not the list's.
-                const { fromPi: _fromPi, ...shown } = meta;
+                const { fromPi: _fromPi, linkedFrom, ...shown } = meta;
+                // Linking does not share the origin: do not leak its id to someone who only sees the new chat.
+                const origin =
+                    linkedFrom === undefined ? undefined : this.#sessions[String(linkedFrom.id)];
+                const visibleOrigin =
+                    origin !== undefined &&
+                    origin.pip === undefined &&
+                    (user === undefined ||
+                        this.canSee(user, linkedFrom!.id as unknown as ConversationId));
+
+                const linkage: { linkedFrom?: SessionMeta["linkedFrom"]; linkedOrigin?: true } =
+                    linkedFrom === undefined
+                        ? {}
+                        : visibleOrigin
+                          ? { linkedFrom }
+                          : { linkedOrigin: true };
 
                 return {
                     id: Number(id),
                     ...shown,
+                    ...linkage,
                     busy,
                     waiting: waiting.has(id),
                     ...(endedAt === undefined ? {} : { endedAt }),
+                    ...(this.#failed.has(Number(id) as unknown as ConversationId)
+                        ? { failed: true }
+                        : {}),
                     ...(model === undefined ? {} : { model: model.modelId }),
                     ...(here.length === 0 ? {} : { people: here }),
                     ...(chat === undefined ? {} : { chatAt: chat.at, chatBy: chat.userId }),
@@ -1703,9 +1962,12 @@ export class PocketApp {
             ...(room.subagentName === undefined ? {} : { subagentName: room.subagentName }),
             // Each browser finds the source's title in its own session list, so only people who can open it get a link.
             ...(forkedFrom === undefined ? {} : { forkedFrom }),
-            // The session's spend with its subagents', and its limit.
+            // The session's spend with its subagents', and its limit, with what counts against it.
             spend: {
-                spent: this.spend.sessionSpent(root),
+                spent:
+                    budget === undefined
+                        ? this.spend.sessionSpent(root)
+                        : this.spend.budgetSpent(root),
                 ...(budget === undefined ? {} : { budget }),
             },
             ...(meta?.worktree === undefined
@@ -2119,15 +2381,20 @@ export class PocketApp {
     ): Promise<{ modules: ExtensionInfo[]; guard: GuardStatus; dropIns?: string }> {
         const owner = user.role === "owner";
         // A load error can name the server's folders too.
-        const modules = this.loader.list().map(({ path, error, ...module }) =>
+        // Modules' routes are the owner's to know: others see only whose tabs load a browser module.
+        const modules = this.loader.list().map(({ path, error, web, ...module }) =>
             owner
                 ? {
                       ...module,
                       ...(path === undefined ? {} : { path }),
+                      ...(web === undefined ? {} : { web }),
                       ...(error === undefined ? {} : { error }),
                   }
                 : {
                       ...module,
+                      ...(web?.client === undefined || !mayUse(user, web.client)
+                          ? {}
+                          : { web: { routes: [], client: web.client } }),
                       ...(error === undefined ? {} : { error: "It failed to load." }),
                   },
         );
@@ -2250,6 +2517,83 @@ export class PocketApp {
 
         this.config.pipCompactAt = tokens;
         await this.#refreshClients();
+    }
+
+    /**
+     * The theme and colors browsers start with until their person chooses (`config.themeDefault`): the owner's to set,
+     * or `null` for the app's own. Everyone's tabs hear it in `hello`.
+     */
+    async setThemeDefault(user: User, choice: unknown): Promise<void> {
+        if (user.role !== "owner") {
+            throw new HttpError(403, "Only the owner sets the default theme");
+        }
+
+        if (choice === null) {
+            this.config.themeDefault = undefined;
+        } else {
+            const { look, colors } = (choice ?? {}) as { look?: unknown; colors?: unknown };
+
+            if (
+                typeof look !== "string" ||
+                typeof colors !== "string" ||
+                !THEME_ID.test(look) ||
+                !THEME_ID.test(colors.replace(/@(dark|light)$/, ""))
+            ) {
+                throw new HttpError(
+                    400,
+                    "The default is { look, colors }: a theme's id and colors' id, or null",
+                );
+            }
+
+            if (!this.themes.list().some((each) => each.id === look && each.usable)) {
+                throw new HttpError(404, "No such theme");
+            }
+
+            // Colors that are not here (the desktop's, on a machine without Omarchy) would leave new browsers on none.
+            if (!(await this.themes.hasColors(colors))) {
+                throw new HttpError(404, "No such colors here");
+            }
+
+            this.config.themeDefault = { look, colors };
+        }
+
+        await this.#refreshClients();
+    }
+
+    /**
+     * The owner's default after a theme went (removed in Appearance or the gallery, or its folder deleted): a theme that
+     * is gone gives way to Pocket, and colors that went with it (its own) to the desktop's; with both gone, no default.
+     * Everyone's tabs hear it.
+     */
+    async #themeDefaultStillHere(): Promise<void> {
+        const before = this.config.themeDefault;
+
+        // When the owner's themes could not be read at the start, they are not gone: keep the default for the next start.
+        if (before === undefined || this.themes.failure !== undefined) {
+            return;
+        }
+
+        try {
+            const lookGone =
+                before.look !== BASE_THEME &&
+                !this.themes.list().some((each) => each.id === before.look);
+            // The desktop's colors are the app's own default: they never go.
+            const colorsGone =
+                before.colors !== "desktop" && !(await this.themes.hasColors(before.colors));
+
+            if (!lookGone && !colorsGone) {
+                return;
+            }
+
+            const look = lookGone ? BASE_THEME : before.look;
+            const colors = colorsGone ? "desktop" : before.colors;
+
+            this.config.themeDefault =
+                look === BASE_THEME && colors === "desktop" ? undefined : { look, colors };
+            await this.#refreshClients();
+        } catch (error) {
+            this.#log(`The default theme could not be checked: ${describe(error)}`);
+        }
     }
 
     /**
@@ -2436,7 +2780,8 @@ export class PocketApp {
             try {
                 await this.loader.reload(SUBAGENTS_FILE);
             } catch (error) {
-                this.notice("error", `Subagents failed to reload: ${describe(error)}`);
+                // A module's error can name the server's folders: the owner's to read.
+                this.ownerNotice("error", `Subagents failed to reload: ${describe(error)}`);
             }
         }
 
@@ -2482,11 +2827,17 @@ export class PocketApp {
         this.#closing ??= (async () => {
             clearTimeout(this.#sessionsTimer);
             this.alerts.close();
+            this.themes.close();
             this.spend.close();
             this.#unsubscribeCommits?.();
             this.#unsubscribeApprovals?.();
             this.#unsubscribeBrowsers?.();
-            this.loader?.close();
+
+            // Modules' cleanups may wait (closing a connection), but not for long: the rest must close too.
+            const cleaned = this.loader?.close();
+
+            // After the loader: its last changes could set it again.
+            clearTimeout(this.#websTimer);
 
             for (const client of this.#clients) {
                 client.send("closing", {});
@@ -2500,6 +2851,17 @@ export class PocketApp {
             }
 
             this.providers.close();
+
+            // A timer that holds the process: with nothing else to do, Node would end it here, before the rest closed.
+            let limit: NodeJS.Timeout | undefined;
+
+            await Promise.race([
+                cleaned,
+                new Promise<void>((resolve) => {
+                    limit = setTimeout(resolve, CLEANUP_LIMIT_MS);
+                }),
+            ]);
+            clearTimeout(limit);
 
             try {
                 // Close writes no outcome: running work resumes when the next process opens the storage.

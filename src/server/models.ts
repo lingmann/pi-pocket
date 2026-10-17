@@ -8,7 +8,7 @@ import {
     type Model,
     type ModelThinkingLevel,
 } from "@earendil-works/pi-ai";
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import type { ModelRuntime, ScopedModel } from "@earendil-works/pi-coding-agent";
 import type { AgentState, ModelRef } from "@earendil-works/pi-durable";
 
 // A record, so a level Pi adds fails the type check until it is here too.
@@ -40,6 +40,7 @@ type ModelSummary = {
     reasoning: boolean;
     images: boolean;
     levels: string[];
+    scoped?: true;
     /** Its provider's sign-in expired and could not be renewed: it works again once someone signs in. */
     signIn?: true;
 };
@@ -72,13 +73,17 @@ function capabilities(model: Model<Api>) {
 export function modelList(
     models: ModelRuntime,
     signInNeeded: SignInNeeded = () => false,
+    scopedModels: readonly ScopedModel[] = [],
 ): ModelSummary[] {
+    const scoped = new Set(scopedModels.map(({ model }) => `${model.provider}/${model.id}`));
+
     return models.getAvailableSnapshot().map((model) => ({
         provider: model.provider,
         id: model.id,
         name: model.name,
         contextWindow: model.contextWindow,
         ...capabilities(model),
+        ...(scoped.has(`${model.provider}/${model.id}`) ? { scoped: true as const } : {}),
         ...(signInNeeded(model.provider) ? { signIn: true as const } : {}),
     }));
 }

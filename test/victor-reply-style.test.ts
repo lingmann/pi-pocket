@@ -34,7 +34,7 @@ import createVictorReplyStyle from "../src/server/extensions/victor-reply-style.
 import type { PocketHost } from "../src/server/host.ts";
 import { createHandler } from "../src/server/http.ts";
 import { ownRequest } from "../src/server/requests.ts";
-import { recordInputSource } from "../src/server/victor-replies.ts";
+import { recordInputSource, victorReplyMode } from "../src/server/victor-replies.ts";
 
 const input = { conversationId: 1 as ConversationId } as PromptInput;
 const answer = () => fauxAssistantMessage([fauxText("Done.")]);
@@ -134,19 +134,22 @@ test("a failed source lookup replaces voice instructions in the model's next req
     await wait(app, (await submit(app, id, { source: "victor" })).submissionId);
     assert.equal(seen.length, 1);
     assertVoice(seen[0]!);
-    const original = app.host.victorReplyMode;
+    const original = app.harness.snapshot;
+    const snapshot = t.mock.method(app.harness, "snapshot", async (...args: unknown[]) => {
+        if (args[0] === InputSourceDoc) {
+            throw new Error("test lookup failure");
+        }
+
+        return Reflect.apply(original, app.harness, args);
+    });
 
     try {
-        app.host.victorReplyMode = async () => {
-            throw new Error("test lookup failure");
-        };
-
         await wait(app, (await submit(app, id)).submissionId);
         assert.equal(seen.length, 2);
         assertText(seen[1]!);
         assert.doesNotMatch(seen[1]!.style!, /at most three short sentences/);
     } finally {
-        app.host.victorReplyMode = original;
+        snapshot.mock.restore();
     }
 });
 
@@ -241,7 +244,7 @@ test("a typed follow-up waits while voice survives a tool round; a withdrawn voi
     const withdrawn = await submit(app, id, { source: "victor", text: "Do not answer this" });
 
     await app.commands.withdraw(id, owner(app), Number(withdrawn.submissionId));
-    assert.equal(await app.host.victorReplyMode(id, context), "victor");
+    assert.equal(await victorReplyMode(app, id, context), "victor");
     gate.resolve();
     await wait(app, voice.submissionId);
     await wait(app, typed.submissionId);
@@ -282,7 +285,7 @@ for (const initial of ["victor", undefined] as const) {
             text: "Steering",
         });
 
-        assert.equal(await app.host.victorReplyMode(id, context), initial ?? "text");
+        assert.equal(await victorReplyMode(app, id, context), initial ?? "text");
         gate.resolve();
         await wait(app, first.submissionId);
         await wait(app, steer.submissionId);
@@ -436,7 +439,7 @@ test("compaction during a voice run does not lose its source", async (t) => {
     const task = await conversation.compact(undefined, context);
 
     await until(() => compacting, "compaction model request");
-    assert.equal(await app.host.victorReplyMode(id, context), "victor");
+    assert.equal(await victorReplyMode(app, id, context), "victor");
     gate.resolve();
     await app.harness.waitForTask(task, context);
     await wait(app, voice.submissionId);
@@ -490,7 +493,7 @@ test("subagents and PiP never inherit Victor style; a subagent report starts ord
     const pip = await app.pip.ensure(owner(app));
 
     for (const excluded of [child, pip]) {
-        assert.equal(await app.host.victorReplyMode(excluded, context), undefined);
+        assert.equal(await victorReplyMode(app, excluded, context), undefined);
         await assert.rejects(submit(app, excluded, { source: "victor" }), /main sessions only/);
     }
 });

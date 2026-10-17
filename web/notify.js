@@ -173,7 +173,11 @@ export function NotificationsSheet() {
 
     const on = Boolean(subscription);
 
-    return html`<${Sheet} title="Notifications" onClose=${closeSheet}>
+    return html`<${Sheet}
+        title="Notifications"
+        onClose=${closeSheet}
+        className="notifications-sheet"
+    >
         <p class="muted small">
             Get a notification on this device when you are not looking at the session: Pi finished, Pi needs approval, or someone wrote to you.
         </p>
@@ -181,38 +185,42 @@ export function NotificationsSheet() {
         ${
             !info || subscription === undefined
                 ? html`<${Loader} label="Checking this device" />`
-                : html`<div class="extension">
-                    <div class="extension-main">
-                        <div class="extension-title">This device</div>
-                        <div class="muted small">
-                            ${on ? "Notifications are on." : "Notifications are off."} ${info.devices > 0 ? `${info.devices} device${info.devices === 1 ? "" : "s"} of yours ${info.devices === 1 ? "gets" : "get"} them.` : ""}
-                        </div>
-                    </div>
-                    <div class="extension-actions">
-                        <${Switch}
-                            on=${on}
-                            disabled=${busy || (!on && problem !== null)}
-                            label="Notifications on this device"
-                            onChange=${on ? disable : enable}
-                        />
-                    </div>
-                </div>
-                <div class="group-title">Notify me about</div>
-                ${KINDS.map(
-                    ([key, title, hint]) => html`<div class="extension">
+                : html`<div class="sheet-list">
+                    <div class="extension">
                         <div class="extension-main">
-                            <div>${title}</div>
-                            <div class="muted small">${hint}</div>
+                            <div class="extension-title">This device</div>
+                            <div class="muted small">
+                                ${on ? "Notifications are on." : "Notifications are off."} ${info.devices > 0 ? `${info.devices} device${info.devices === 1 ? "" : "s"} of yours ${info.devices === 1 ? "gets" : "get"} them.` : ""}
+                            </div>
                         </div>
                         <div class="extension-actions">
                             <${Switch}
-                                on=${info.prefs[key]}
-                                label=${title}
-                                onChange=${() => setPref(key, !info.prefs[key])}
+                                on=${on}
+                                disabled=${busy || (!on && problem !== null)}
+                                label="Notifications on this device"
+                                onChange=${on ? disable : enable}
                             />
                         </div>
-                    </div>`,
-                )}
+                    </div>
+                </div>
+                <div class="group-title">Notify me about</div>
+                <div class="sheet-list">
+                    ${KINDS.map(
+                        ([key, title, hint]) => html`<div class="extension">
+                            <div class="extension-main">
+                                <div>${title}</div>
+                                <div class="muted small">${hint}</div>
+                            </div>
+                            <div class="extension-actions">
+                                <${Switch}
+                                    on=${info.prefs[key]}
+                                    label=${title}
+                                    onChange=${() => setPref(key, !info.prefs[key])}
+                                />
+                            </div>
+                        </div>`,
+                    )}
+                </div>
                 ${
                     on &&
                     html`<button class="button wide" onClick=${test}>
