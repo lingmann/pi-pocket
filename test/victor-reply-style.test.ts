@@ -31,12 +31,16 @@ import {
 import type { SubmitRequest } from "../src/server/commands.ts";
 import { InputSourceDoc, SubagentsDoc } from "../src/server/docs.ts";
 import createVictorReplyStyle from "../src/server/extensions/victor-reply-style.ts";
-import type { PocketHost } from "../src/server/host.ts";
+import type { ExtensionWeb, PocketHost } from "../src/server/host.ts";
 import { createHandler } from "../src/server/http.ts";
 import { ownRequest } from "../src/server/requests.ts";
 import { recordInputSource, victorReplyMode } from "../src/server/victor-replies.ts";
 
-const input = { conversationId: 1 as ConversationId } as PromptInput;
+const input = {
+    conversationId: 1 as ConversationId,
+    read: { snapshot: async () => undefined },
+} as unknown as PromptInput;
+const oldWeb = {} as ExtensionWeb;
 const answer = () => fauxAssistantMessage([fauxText("Done.")]);
 
 type Seen = { text: string; role: string; style: string | undefined };
@@ -88,9 +92,12 @@ after(cleanUp);
 
 test("Victor's renderer switches between stable voice and text instructions", async () => {
     let mode: "victor" | "text" | undefined = "victor";
-    const extension = createVictorReplyStyle({
-        victorReplyMode: async () => mode,
-    } as unknown as PocketHost);
+    const extension = createVictorReplyStyle(
+        {
+            victorReplyMode: async () => mode,
+        } as unknown as PocketHost,
+        oldWeb,
+    );
     const render = extension.sections![0]!.render;
     const voice = await render(input, context);
 
@@ -105,16 +112,19 @@ test("Victor's renderer switches between stable voice and text instructions", as
 
 test("Victor's renderer tolerates an old host and clears voice restrictions on lookup failure", async () => {
     assert.equal(
-        await createVictorReplyStyle({} as PocketHost).sections![0]!.render(input, context),
+        await createVictorReplyStyle({} as PocketHost, oldWeb).sections![0]!.render(input, context),
         undefined,
     );
     const warnings: unknown[] = [];
-    const extension = createVictorReplyStyle({
-        victorReplyMode: async () => {
-            throw new Error("lookup failed");
-        },
-        notice: (...args: unknown[]) => warnings.push(args),
-    } as unknown as PocketHost);
+    const extension = createVictorReplyStyle(
+        {
+            victorReplyMode: async () => {
+                throw new Error("lookup failed");
+            },
+            notice: (...args: unknown[]) => warnings.push(args),
+        } as unknown as PocketHost,
+        oldWeb,
+    );
 
     assert.match(
         (await extension.sections![0]!.render(input, context))!,

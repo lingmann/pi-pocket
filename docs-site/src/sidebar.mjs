@@ -73,20 +73,6 @@ export const SIDEBAR = [
             ["docs/fork-workflow.md", "Maintaining the shared fork"],
         ],
     },
-    {
-        label: "Victor plans and validation",
-        collapsed: true,
-        items: [
-            ["docs/plans/on-device-victor-mvp.md", "MVP plan"],
-            ["docs/plans/on-device-victor-mvp-validation.md", "MVP validation"],
-            ["docs/plans/on-device-victor-kitten-tts.md", "Kitten Micro TTS plan"],
-            ["docs/plans/on-device-victor-kitten-validation.md", "Kitten Micro validation"],
-            ["docs/plans/on-device-victor-data-pack.md", "Pronunciation data and updates"],
-            ["docs/plans/on-device-victor-model-cache.md", "Model cache"],
-            ["docs/plans/on-device-victor-model-comparison.md", "Speech model comparison"],
-            ["docs/plans/on-device-victor-modularity.md", "Smaller integration points"],
-        ],
-    },
 ];
 
 /** Where the sections of the one long extensions.md went, so the check can say where a stale link should go. */
