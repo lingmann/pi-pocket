@@ -4,6 +4,8 @@ Victor is an experimental, English-only conversation mode that recognizes speech
 
 ## Setup
 
+**Installation support:** Run this fork from a checkout using the setup below. Nix and NixOS packaging is retained from upstream but is not adapted or supported for this fork, including Victor's speech assets and fork-specific build checks.
+
 On the server, prepare the pinned speech assets:
 
 ```sh
