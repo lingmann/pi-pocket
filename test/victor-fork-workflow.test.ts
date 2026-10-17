@@ -450,6 +450,75 @@ test("fork script rejects malformed input and unsupported options before running
     }
 });
 
+test("upstream update previews only incoming workflow changes before confirmation", (t) => {
+    const f = fixture(t);
+    const writer = join(f.root, "workflow-writer");
+    const workflows = ".github/workflows";
+
+    f.gitAt(f.root, "clone", f.upstream, writer);
+    mkdirSync(join(writer, workflows), { recursive: true });
+
+    for (const name of ["edit", "delete", "rename"]) {
+        writeFileSync(join(writer, workflows, `${name}.yml`), `name: ${name}\n`);
+    }
+
+    f.gitAt(writer, "add", ".");
+    f.gitAt(writer, "commit", "-m", "shared workflows");
+    f.gitAt(writer, "push", "origin", "main");
+    f.git("fetch", "upstream");
+    f.git("merge", "--no-edit", "upstream/main");
+    f.put(`${workflows}/fork-only.yml`, "name: fork-only\n");
+    f.commit("fork-only workflow");
+    f.git("push", "origin", "main");
+
+    writeFileSync(join(writer, workflows, "edit.yml"), "name: edited\n");
+    writeFileSync(join(writer, workflows, "added.yml"), "name: added\n");
+    writeFileSync(join(writer, "unrelated.txt"), "unrelated content\n");
+    f.gitAt(writer, "rm", `${workflows}/delete.yml`);
+    f.gitAt(writer, "mv", `${workflows}/rename.yml`, `${workflows}/renamed.yml`);
+    f.gitAt(writer, "add", ".");
+    f.gitAt(writer, "commit", "-m", "upstream workflow changes");
+    f.gitAt(writer, "push", "origin", "main");
+    f.git("config", "color.ui", "always");
+    const result = f.run("upstream-update", "next", "no\n");
+
+    failure(result);
+    const prompt = result.output.indexOf("Type yes");
+
+    assert.ok(prompt >= 0, result.output);
+    const preview = result.output.slice(0, prompt);
+
+    for (const expected of [
+        "=== INCOMING WORKFLOW CHANGES ===",
+        `A\t${workflows}/added.yml`,
+        `D\t${workflows}/delete.yml`,
+        `M\t${workflows}/edit.yml`,
+        `R100\t${workflows}/rename.yml\t${workflows}/renamed.yml`,
+        "diff --git",
+        "+name: added",
+        "-name: delete",
+        "+name: edited",
+        `rename to ${workflows}/renamed.yml`,
+    ]) {
+        assert.ok(
+            preview.includes(expected),
+            `Missing ${expected} before confirmation:\n${preview}`,
+        );
+    }
+
+    assert.doesNotMatch(preview, /fork-only|unrelated content|\x1b\[/);
+});
+
+test("upstream update stays quiet about workflows when only other files change", (t) => {
+    const f = fixture(t);
+
+    f.advanceUpstream();
+    const result = f.run("upstream-update", "next");
+
+    success(result);
+    assert.doesNotMatch(result.output, /INCOMING WORKFLOW CHANGES|diff --git/);
+});
+
 test("status fetches upstream without changing dirty detached HEAD, with origin history and local fallback", (t) => {
     const f = fixture(t);
 

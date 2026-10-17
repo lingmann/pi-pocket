@@ -61,6 +61,8 @@ Prefer running one recipe per command. Just rejects unknown recipe names and mis
 | `just upstream-update v0.13.3` | Fetch both mains; create `sync/upstream-v0.13.3` from `origin/main` and merge `upstream/main`.          |
 | `just release 0.1.0`           | Tag and push only `victor/v0.1.0`, requiring main to match freshly fetched `origin/main`.               |
 
+Before the existing merge confirmation, `just upstream-update` prints a prominent notice, file-status summary, and diff if upstream has incoming changes under `.github/workflows/`, including additions, renames, and deletions. The script compares upstream with the common ancestor of the fetched mains, so fork-only edits are not reported as incoming changes. The diff uses color in an interactive terminal unless `NO_COLOR` is set; redirected output stays plain. It adds no extra prompt and does not change GitHub settings.
+
 Start features with `just feature <slug>` before editing. It creates `$USER/<slug>` from freshly fetched `origin/main`, leaving local `main` unchanged. Override the namespace with, for example, `USER=alice just feature voice-fix`.
 
 `just pr "<description>"` publishes the branch and opens the PR. On an upstream-update branch, omit the description.

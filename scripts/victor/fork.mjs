@@ -209,6 +209,27 @@ async function upstreamUpdate(name) {
         return;
     }
 
+    // Compare with the common ancestor so fork-only edits are not shown as incoming changes.
+    const workflowDiff = [
+        "--no-ext-diff",
+        "--no-textconv",
+        "--find-renames",
+        `${forkHead}...${upstreamHead}`,
+        "--",
+        ".github/workflows/",
+    ];
+    const workflows = git("diff", "--no-color", "--name-status", ...workflowDiff);
+
+    if (workflows) {
+        console.log("\n=== INCOMING WORKFLOW CHANGES ===\n");
+        console.log(workflows);
+        console.log();
+        const color = process.stdout.isTTY && !Object.hasOwn(process.env, "NO_COLOR");
+
+        console.log(git("diff", `--color=${color ? "always" : "never"}`, ...workflowDiff));
+        console.log("\n=== END WORKFLOW CHANGES ===\n");
+    }
+
     await confirm(
         `Create ${branch} and merge upstream into it?\nFork: origin (${ctx.originURL}) at ${forkHead}\nUpstream: ${ctx.upstreamURL} at ${upstreamHead}\nThis switches files and may leave merge conflicts. Use a development checkout, not a serving checkout. Nothing will be pushed.`,
     );
