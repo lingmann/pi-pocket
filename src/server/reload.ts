@@ -39,6 +39,7 @@ const ORDER = [
     "memory.ts",
     "pip.ts",
     "triggers.ts",
+    "victor-reply-style.ts",
 ];
 /** Modules the app cannot work without: always on. */
 const REQUIRED = new Set(["prompt.ts"]);
@@ -57,6 +58,7 @@ const TITLES: Record<string, string> = {
     "memory.ts": "Memory",
     "pip.ts": "PiP",
     "triggers.ts": "Triggers",
+    "victor-reply-style.ts": "Victor reply style",
 };
 
 /**

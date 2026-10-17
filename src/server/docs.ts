@@ -62,6 +62,23 @@ export const AuthorsDoc = defineDoc<{
     initial: () => ({ requests: {}, entries: {} }),
 });
 
+/** How an input was sent, not whether a browser currently has its microphone on. */
+export type InputSource = "text" | "victor";
+
+/**
+ * Immutable source of a person's submission, keyed by its canonical request ID. Recorded before admission so even
+ * the first generation sees it; a retry keeps the first value. Forks start without a source for their own requests.
+ */
+export const InputSourceDoc = defineDocFamily<{ source?: InputSource }, null>({
+    kind: "pocket.input-source",
+    version: 1,
+    family: true,
+    scope: "conversation",
+    history: "latest",
+    fork: "initial",
+    initial: () => ({}),
+});
+
 export type ArtifactType = "html" | "markdown" | "svg";
 
 export type ArtifactVersion = {

@@ -163,7 +163,11 @@ Plain ES modules, served as they are, with no build. Editing a file under `web/`
 
 ### Browser-local Victor
 
-Victor runs recognition and speech in the foreground browser; only recognized text uses the normal submission API. Stopping Victor releases local audio but never aborts Pi's shared run. Missing or invalid prepared assets affect only Victor requests, not ordinary app startup.
+Victor runs recognition and speech in the foreground browser; recognized text uses the normal submission API with `source: "victor"`. Stopping Victor releases local audio but never aborts Pi's shared run. Missing or invalid prepared assets affect only Victor requests, not ordinary app startup.
+
+`Commands.submit` validates the source and calls `recordInputSource` (`victor-replies.ts`) before admitting the input. This stores a write-once `InputSourceDoc` family member keyed by the canonical request ID, for text inputs too. Pi Durable's submission API has no metadata field, so this is a separate preceding commit: an interruption can leave an unused source record, but generation cannot start before the source exists. Retries keep its first value; an already-admitted legacy input without a record remains text. Forks start with empty source records.
+
+The `victor-reply-style` extension reads `host.victorReplyMode`, which resolves the last input in `LiveDoc.run.inputs` to its submission and source. It never reads queued inputs or infers mode from transcript text. Tool rounds and synthetic continuations keep the same run inputs; steering appends newly placed inputs, and follow-ups start new runs. This also survives compaction and restart without recovery caches. PiP and subagents are excluded. The section returns one stable voice or text instruction; changing the client toggle alone does not alter an in-flight run.
 
 See [victor.md](victor.md) for setup, use, updates, and troubleshooting. Implementation details live in the Victor source and tests.
 

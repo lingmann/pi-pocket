@@ -80,6 +80,7 @@ type Submission = {
     mode: string;
     attachments: unknown[];
     inlineFiles: boolean;
+    source: "victor";
 };
 
 class Events {
@@ -432,6 +433,7 @@ class Harness {
 
     async api(path: string, body: Submission) {
         assert.equal(path, "c/session/submit", "victor must never call Pi's abort endpoint");
+        assert.equal(body.source, "victor", "every Victor submission tags its input source");
         this.submissions.push({ path, body });
     }
 
@@ -1084,7 +1086,10 @@ test("two turns share one worker/context, submit once, and snapshot speed for th
     assert.ok(
         h.submissions.every(
             ({ body }) =>
-                body.mode === "followUp" && !body.inlineFiles && body.attachments.length === 0,
+                body.mode === "followUp" &&
+                body.source === "victor" &&
+                !body.inlineFiles &&
+                body.attachments.length === 0,
         ),
     );
 });

@@ -136,6 +136,11 @@ export interface PocketHost {
     modelProblem(ref: ModelRef, fresh?: boolean): Promise<string | undefined>;
     /** Who Pi works for in a conversation now: whose message led to its current work. */
     requesterOf(conversationId: ConversationId): string | undefined;
+    /** Source of the active run's latest input; undefined outside a main session. Queued inputs do not count. */
+    victorReplyMode(
+        conversationId: ConversationId,
+        context: Context,
+    ): Promise<"text" | "victor" | undefined>;
     /** Report something odd to the log and the connected clients: with `conversationId`, to that session's tabs only. */
     notice(
         level: "info" | "warning" | "error",
