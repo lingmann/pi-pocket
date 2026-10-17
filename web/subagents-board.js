@@ -6,7 +6,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { folderColor } from "./avatar.js";
 import { useBack } from "./back.js";
-import { fromServer, useOnScreen } from "./peeks.js";
+import { useOnScreen } from "./peeks.js";
+import { fromServer } from "./seen.js";
 import { api, attempt, canSteer, navigate, notify, store } from "./store.js";
 import {
     dismiss,
@@ -195,7 +196,7 @@ function Cell({ agent, state, dim, selected, onPick, onHover }) {
         onMouseEnter=${() => onHover(agent.conversationId)}
         onMouseLeave=${() => onHover(null)}
     >
-        ${needsYou(agent) && "!"}
+        <span class="board-cell-core" aria-hidden="true">${needsYou(agent) && "!"}</span>
     </button>`;
 }
 
@@ -641,7 +642,7 @@ export function SubagentsBoard() {
 
         return html`<div
             key=${id}
-            class=${`board-row ${list.some(matches) ? "" : "dim"}`}
+            class="board-row"
         >
             <button
                 class="board-session"
@@ -699,6 +700,7 @@ export function SubagentsBoard() {
 
     return html`<section
         class=${`board ${phone ? "phone" : ""}`}
+        data-part="subagents-board"
         ref=${box}
         aria-label="Subagents in every session"
     >

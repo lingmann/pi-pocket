@@ -149,7 +149,7 @@ test(
 
         const appPage = await fetch(`${base}/`);
 
-        assert.match(await appPage.text(), /href="\/victor\.css"/);
+        assert.match(await appPage.text(), /@import url\("\/victor\.css"\) layer\(pocket\);/);
     },
 );
 
@@ -289,7 +289,7 @@ async function layout() {
             chip: visible('.victor-chip'),
             readonly: document.querySelector('.composer textarea').readOnly,
             controls: [...document.querySelectorAll('.victor-mode-row button, .victor-speed select')]
-                .map(element => ({ ...rect(element), readReply: element.matches('.button.small') })),
+                .map(rect),
             bounds: [...document.querySelectorAll('.composer, .composer-row, .composer-row > *, .victor-mode, .victor-mode-row > *, .victor-draft, .victor-message')]
                 .filter(element => element.getClientRects().length > 0).map(rect),
         };
@@ -336,12 +336,8 @@ test(
             assert.equal(on.controls.length, 3);
 
             for (const control of on.controls) {
-                // Existing shared .button.small mobile rules override Read reply's 40px minimum.
-                // Preserve that pre-extraction baseline; toggle and speed remain at least 40px.
-                const minimum = control.readReply && width < 600 ? 38 : 40;
-
                 assert.ok(
-                    control.height >= minimum && control.width >= 40,
+                    control.height >= 40 && control.width >= 40,
                     `${width}px Victor touch target ${JSON.stringify(control)}`,
                 );
             }

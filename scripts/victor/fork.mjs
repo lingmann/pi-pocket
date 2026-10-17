@@ -381,6 +381,8 @@ async function pr(description = "") {
     try {
         unchanged(ctx);
         publicationDestination(ctx);
+        git("config", "--local", `branch.${ctx.branch}.remote`, "origin");
+        git("config", "--local", `branch.${ctx.branch}.merge`, `refs/heads/${ctx.branch}`);
 
         if (!existingPR(ctx.branch, true)) {
             run("gh", [

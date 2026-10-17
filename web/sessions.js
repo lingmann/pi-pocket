@@ -2,9 +2,12 @@
 // sidebar, the drawer, and a phone's home screen; and the order and archiving of sessions.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Avatar, folderColor, initials } from "./avatar.js";
-import { useBack } from "./back.js";
+import { goHome, useBack } from "./back.js";
+import { ExtensionRailButtons } from "./extension-ui.js";
 import { useDragToClose } from "./gestures.js";
+import { PeeksRailButton } from "./peeks.js";
 import { PipRailButton } from "./pip.js";
+import { sessionForest } from "./session-tree.js";
 import {
     actions,
     canSteer,
@@ -18,9 +21,29 @@ import {
     setUnread,
     stillMoving,
     store,
+    workspaceOrder,
 } from "./store.js";
+import { finishedUnseen } from "./seen.js";
 import { isPinned, prefs, setPrefs, togglePin } from "./theme.js";
-import { APPLE, html, Icon, shortPath, Slide, timeAgo, usePresence, useSlide } from "./ui.js";
+import {
+    APPLE,
+    html,
+    Icon,
+    railState,
+    scrimPress,
+    shortPath,
+    Slide,
+    timeAgo,
+    usePresence,
+    useSide,
+    useSlide,
+} from "./ui.js";
+
+/**
+ * Back to the session list, where it is not beside the conversation: back past the sessions opened from it, as a
+ * phone's back would go, or to it in this session's place when history does not lead there.
+ */
+export const toSessions = () => goHome(() => navigate(null, { replace: true }));
 
 /** The session list on its way: rows shaped like sessions, lit in turn. */
 function LoadingSessions() {
@@ -36,19 +59,6 @@ function LoadingSessions() {
                 </div>`,
         )}
     </div>`;
-}
-
-/**
- * Sessions in "workspace" order, as Alt+1…9 and the rail number them: pinned ones first (in the order they were
- * pinned), then the rest, newest first. Archived sessions are left out.
- */
-export function workspaceOrder(state = store.state) {
-    const active = state.sessions.filter((session) => !session.archived);
-    const pinned = state.pinned
-        .map((id) => active.find((session) => session.id === id))
-        .filter(Boolean);
-
-    return [...pinned, ...active.filter((session) => !pinned.includes(session))];
 }
 
 /**
@@ -98,13 +108,17 @@ export async function setArchived(ids, archived, { undo = true } = {}) {
             ? `“${title.length > 48 ? `${title.slice(0, 47)}…` : title}”`
             : `${done.length} sessions`;
 
-    notify("info", `${archived ? "Archived" : "Unarchived"} ${what}. Tap to undo.`, async () => {
-        await setArchived(done, !archived, { undo: false });
+    notify(
+        "info",
+        `${archived ? "Archived" : "Unarchived"} ${what}. ${matchMedia("(pointer: coarse)").matches ? "Tap" : "Click"} to undo.`,
+        async () => {
+            await setArchived(done, !archived, { undo: false });
 
-        if (left && store.state.conversationId === null) {
-            navigate(open);
-        }
-    });
+            if (left && store.state.conversationId === null) {
+                navigate(open);
+            }
+        },
+    );
 }
 
 /**
@@ -241,12 +255,58 @@ export function selectFromList(id) {
 }
 
 /**
- * One session on one line: its folder's color, its title, and on the right what goes on there (its working subagents,
+ * The square at the start of a session's row: its folder's color, in the shape of where the session is. The first that
+ * holds wins: a call waiting for you, Pi or its subagents at work, a failed run (solid while new, drawn once seen),
+ * finished since this browser last looked or marked unread (solid), and read or never run (hollow).
+ */
+function stateMark(session, working, marked) {
+    const fresh = marked || finishedUnseen(session);
+
+    if (session.waiting) {
+        return { shape: "waiting", label: "Waiting for approval" };
+    }
+
+    if (session.busy || working) {
+        return { shape: "working", label: "Working" };
+    }
+
+    if (session.failed) {
+        return fresh
+            ? { shape: "failed", label: "Failed, not read" }
+            : { shape: "failed seen", label: "Failed" };
+    }
+
+    return fresh ? { shape: "fresh", label: "Not read" } : { shape: "seen", label: "" };
+}
+
+/** A row's state for themes (`data-state`), by its square's shape: a documented name that stays when the squares change. */
+const ROW_STATES = {
+    waiting: "waiting",
+    working: "working",
+    failed: "failed",
+    fresh: "done",
+    seen: "idle",
+};
+
+/** A session's square, as its row in the list draws it (the home screen's Jump back in too). */
+export function sessionMark(session) {
+    const counts = session.subagents ?? {};
+
+    return stateMark(
+        session,
+        (counts.working ?? 0) + (counts.waiting ?? 0) > 0,
+        isUnread(session.id),
+    );
+}
+
+/**
+ * One session on one line: its folder's color in the shape of its state, its title, and on the right what goes on there (its working subagents,
  * who else is in it, Pi working, a call waiting for you), unread chat, and how long ago. Its folder and model are in
  * its tooltip.
  */
 function SessionRow({
     session,
+    branches,
     index,
     number,
     needle,
@@ -270,22 +330,55 @@ function SessionRow({
     ].filter(Boolean);
     // The Folders tab names the folder above the row already: its model comes first.
     const tip = [title, ...(folders ? where.reverse() : where)].join(" · ");
+    // A search can match the folder or model instead of the title: the row shows which.
+    let hit =
+        needle && !title.toLowerCase().includes(needle)
+            ? [path, session.cwd, session.model].find((text) =>
+                  text?.toLowerCase().includes(needle),
+              )
+            : undefined;
+
+    // A path from the folder that matched: its start is the same in every row, and would push the match out of sight.
+    if (hit && hit !== session.model) {
+        const parts = hit.split("/");
+        const at = parts.findLastIndex((part) => part.toLowerCase().includes(needle));
+
+        hit = at > 0 ? `…/${parts.slice(at).join("/")}` : hit;
+    }
+
     const counts = session.subagents ?? {};
     const live = (counts.working ?? 0) + (counts.waiting ?? 0);
     const failed = failing(counts);
     // Subagents at work, or failed ones nobody dealt with, but not over a call waiting for you: that says more.
     const fork = !session.waiting && (live > 0 || failed > 0);
     const person = collab() ? (session.people ?? []).find((each) => each.id !== me?.id) : undefined;
+    const mark = stateMark(session, live > 0, marked);
+    // Finished since this browser last looked: its result is unread, so its title reads bold.
+    const unseen = finishedUnseen(session);
     // Archive, pin, and mark-unread show on hover; an archived session only comes back, and only for people who steer.
     const acts = (canSteer() ? 1 : 0) + (session.archived ? 0 : 2);
 
     return html`<div
-        class=${`session-row ${open ? "active" : ""} ${selected ? "selected" : ""} ${pressing ? "pressing" : ""} ${moving ? "moving" : ""} ${marked ? "marked-unread" : ""} ${["no-acts", "one-act", "", "three-acts"][acts]}`}
+        class=${`session-row ${open ? "active" : ""} ${selected ? "selected" : ""} ${pressing ? "pressing" : ""} ${moving ? "moving" : ""} ${marked ? "marked-unread" : ""} ${unseen ? "unseen" : ""} ${["no-acts", "one-act", "", "three-acts"][acts]}`}
+        data-part="session-row"
+        data-state=${ROW_STATES[mark.shape.split(" ")[0]]}
         data-id=${session.id}
-        style=${`--i:${index}`}
+        style=${`--i:${index};--linked-depth:${Math.min(branches.length, 3)}`}
     >
+        ${
+            branches.length > 0 &&
+            html`<span class="session-branches" data-part="session-branches" aria-hidden="true">
+                ${branches.slice(-3).map(
+                    (continues, index, visible) => html`<span
+                        class=${`${continues ? "continues" : ""} ${index === visible.length - 1 ? "elbow" : ""}`}
+                    ></span>`,
+                )}
+            </span>`
+        }
         <button
             class=${`session ${unread ? "unread" : ""}`}
+            data-part="session-button"
+            aria-current=${open ? "page" : undefined}
             onPointerDown=${(event) => onSelect(event, session.id)}
             onClick=${(event) => onPick(event, session.id)}
             onContextMenu=${(event) => event.ctrlKey && event.preventDefault()}
@@ -298,13 +391,24 @@ function SessionRow({
                             <${Icon} name="check" size=${9} />
                         </span>`
                         : html`<span
-                            class="folder-mark"
+                            class=${`state-mark ${mark.shape}`}
+                            data-part="session-mark"
                             style=${`--folder:${folderColor(session.cwd)}`}
+                            role=${mark.label ? "img" : undefined}
+                            aria-label=${mark.label || undefined}
+                            aria-hidden=${mark.label ? undefined : "true"}
                         ></span>`
                 }
             </span>
-            <span class="session-title">
-                <${Highlight} text=${title} needle=${needle} />
+            <span class=${`session-title ${hit ? "with-hit" : ""}`}>
+                ${
+                    hit
+                        ? html`<span class="session-name">${title}</span>
+                            <span class="session-hit">
+                                <${Highlight} text=${hit} needle=${needle} />
+                            </span>`
+                        : html`<${Highlight} text=${title} needle=${needle} />`
+                }
             </span>
             <span class="session-side">
                 ${
@@ -313,19 +417,21 @@ function SessionRow({
                         class=${`session-fork ${live > 0 ? "" : "failed"}`}
                         title=${subagentsTip(counts)}
                     >
-                        <${Icon} name="fork" size=${11} />${live > 0 ? live : failed}
+                        <${Icon} name="fork" size=${10} />${live > 0 ? live : failed}
                     </span>`
                 }
-                ${!fork && person && html`<${Avatar} person=${person} size=${16} />`}
+                ${!fork && person && html`<${Avatar} person=${person} size=${18} />`}
                 ${
                     session.busy &&
                     !session.waiting &&
                     !fork &&
-                    html`<span class="mini-sweep" title="Working"><i></i><i></i><i></i></span>`
+                    html`<span class="session-working" title="Working"></span>`
                 }
                 ${
                     session.waiting &&
-                    html`<span class="state-warn" title="Waiting for approval">!</span>`
+                    html`<span class="session-needs" title="Waiting for approval">
+                        ${canSteer() ? "needs you" : "waiting"}
+                    </span>`
                 }
                 ${
                     (unread || marked) &&
@@ -517,12 +623,18 @@ export function SessionList({ compact = false }) {
                     .toLowerCase()
                     .includes(needle)),
     );
-    const groups = groupsOf(shown, { tab, needle, home: server?.home, pinned });
+    const forest = sessionForest(shown, { pinned, folders: tab === "folders" });
+    const groups = groupsOf(forest.roots, { tab, needle, home: server?.home, pinned }).map(
+        (group) => ({
+            ...group,
+            rows: group.rows.flatMap((root) => forest.rows.get(root.id)),
+        }),
+    );
 
     visible.current = groups.flatMap((group) =>
         closed.has(group.key) && group.key !== "flat"
             ? []
-            : group.rows.map((session) => session.id),
+            : group.rows.map(({ session }) => session.id),
     );
     const chosen = shown.filter((session) => selected.has(session.id)).map((session) => session.id);
     // Taps select while the bar shows: not for rows selected and then hidden (archived, or searched away).
@@ -875,15 +987,15 @@ export function SessionList({ compact = false }) {
     const count = sessions.filter((session) => !session.archived).length;
     let index = 0;
 
-    return html`<div class=${`sessions ${compact ? "compact" : ""}`}>
+    return html`<div class=${`sessions ${compact ? "compact" : ""}`} data-part="session-list">
         <div class="sessions-head">
-            <span class="sessions-name">Sessions</span>
+            <span class="sessions-name" data-part="session-list-title">Sessions</span>
             <span class="sessions-count">${sessionsLoaded ? count : ""}</span>
             ${
                 canStart &&
                 html`<button
                     class="new-button"
-                    title="New session (Alt N)"
+                    title="New session (Alt+N)"
                     onClick=${() => openSheet({ type: "cwd", mode: "new" })}
                 >
                     <${Icon} name="plus" size=${14} />
@@ -891,10 +1003,11 @@ export function SessionList({ compact = false }) {
                 </button>`
             }
         </div>
-        <label class=${`search ${query ? "filled" : ""}`}>
+        <label class=${`search ${query ? "filled" : ""}`} data-part="session-search">
             <${Icon} name="search" size=${14} />
             <input
                 placeholder="Search sessions"
+                aria-label="Search sessions"
                 value=${query}
                 onInput=${(event) => setQuery(event.currentTarget.value)}
                 onKeyDown=${(event) => {
@@ -919,6 +1032,7 @@ export function SessionList({ compact = false }) {
                     : html`<span
                             class="search-keys"
                             title="Launcher"
+                            aria-hidden="true"
                             onClick=${(event) => {
                                 event.preventDefault();
                                 store.set({ launcher: true, drawer: false });
@@ -939,7 +1053,7 @@ export function SessionList({ compact = false }) {
                         </button>`
             }
         </label>
-        <div class="session-tabs" role="tablist" ref=${tabs}>
+        <div class="session-tabs" data-part="session-tabs" role="tablist" ref=${tabs}>
             ${TABS.map(
                 ([key, label]) => html`<button
                     role="tab"
@@ -967,26 +1081,45 @@ export function SessionList({ compact = false }) {
             }
             ${groups.map((group) => {
                 const isClosed = closed.has(group.key) && group.key !== "flat";
+                // A folded group hides its rows' marks: say when one waits for you or its run failed.
+                const trouble = isClosed
+                    ? group.rows
+                          .map((row) => sessionMark(row.session).shape)
+                          .find((shape) => shape === "waiting" || shape === "failed")
+                    : undefined;
 
                 return html`<section
                     class=${`session-group ${isClosed ? "closed" : ""}`}
+                    data-part="session-group"
                     key=${`${tab}:${group.key}`}
                 >
                     ${
                         group.key !== "flat" || needle
                             ? html`<button
                                 class="group-head"
+                                data-part="session-group-head"
                                 onClick=${() => group.key !== "flat" && toggleGroup(group.key)}
                                 aria-expanded=${!isClosed}
                             >
-                                <span class="group-name">
+                                <span class="group-name" data-part="session-group-name">
                                     ${
                                         typeof group.label === "string"
                                             ? html`<b>${group.label}</b>`
                                             : group.label
                                     }
                                 </span>
-                                <span class="group-count">${group.rows.length}</span>
+                                ${
+                                    trouble &&
+                                    html`<span
+                                        class=${`group-trouble ${trouble}`}
+                                        role="img"
+                                        aria-label=${trouble === "waiting" ? "A session needs you" : "A session failed"}
+                                        title=${trouble === "waiting" ? "A session here needs you" : "A session here failed"}
+                                    ></span>`
+                                }
+                                <span class="group-count" data-part="session-group-count">
+                                    ${group.rows.length}
+                                </span>
                                 ${group.key !== "flat" && html`<${Icon} name="down" size=${11} />`}
                             </button>`
                             : null
@@ -994,10 +1127,11 @@ export function SessionList({ compact = false }) {
                     <div class="group-body" inert=${isClosed}>
                         <div>
                             ${group.rows.map(
-                                (session) =>
+                                ({ session, branches }) =>
                                     html`<${SessionRow}
                                         key=${session.id}
                                         session=${session}
+                                        branches=${branches}
                                         index=${index++}
                                         number=${numbers.get(session.id)}
                                         needle=${needle}
@@ -1070,7 +1204,9 @@ export function subagentTotals(sessions = store.state.sessions) {
 /** Open the subagents board in the conversation's place, or close it. */
 export const toggleBoard = () =>
     store.set((state) =>
-        state.board ? { board: false, boardAgents: null } : { board: true, drawer: false },
+        state.board
+            ? { board: false, boardAgents: null }
+            : { board: true, drawer: false, page: null },
     );
 
 /** The folded sidebar's sessions, numbered like Waybar's workspaces. */
@@ -1087,7 +1223,9 @@ function RailTiles() {
                 key=${session.id}
                 class=${`ws ${session.id === conversationId ? "active" : ""} ${session.busy ? "busy" : ""} ${session.waiting ? "waiting" : ""}`}
                 style=${`--i:${index}`}
-                title=${`${session.title ?? "New session"}${index < 9 ? `  (Alt ${index + 1})` : ""}`}
+                title=${`${session.title ?? "New session"}${index < 9 ? ` (Alt+${index + 1})` : ""}`}
+                aria-label=${`${session.title ?? "New session"}${session.waiting ? ", needs you" : session.busy ? ", working" : ""}`}
+                aria-current=${session.id === conversationId ? "page" : undefined}
                 onClick=${() => navigate(session.id)}
             >
                 ${index < 9 ? index + 1 : initials(session.title ?? "New session")}
@@ -1102,9 +1240,9 @@ function RailTiles() {
 }
 
 /**
- * The rail beside the session list: Pi (which folds the sidebar), the sessions, then the tools (running now, the
- * subagents board, people, providers, the theme) and you. Folded, it holds the sessions too, numbered. In the drawer and
- * on a phone's home screen it does not fold.
+ * The rail beside the session list: Pi (home), the sessions (which fold the sidebar), then the tools (peek tiles, PiP,
+ * running now, the subagents board, people, providers, the theme) and you. Folded, it holds the sessions too, numbered.
+ * In the drawer and on a phone's home screen it does not fold, and Pi is a mark.
  */
 export function RailNav({ foldable = false, folded = false }) {
     const { sessions, board, me } = store.state;
@@ -1113,67 +1251,80 @@ export function RailNav({ foldable = false, folded = false }) {
     const agents = subagentTotals(sessions);
     const live = agents.working + agents.waiting;
     const failed = failing(agents);
-    const keys = `${APPLE ? "⌘" : "Ctrl"} B`;
+    const keys = APPLE ? "⌘B" : "Ctrl+B";
     const fold = () => setPrefs({ sidebar: folded ? "open" : "rail" });
     const role = me?.role === "owner" ? "owner" : me?.role === "viewer" ? "view only" : "guest";
 
-    return html`<nav class="rail" aria-label="Sessions and tools">
+    return html`<nav class="rail" data-part="rail" aria-label="Sessions and tools">
         ${
             foldable
                 ? html`<button
                     class="rail-brand"
-                    title=${`${folded ? "Unfold" : "Fold"} the sidebar (${keys})`}
-                    aria-label=${folded ? "Unfold the sidebar" : "Fold the sidebar"}
-                    onClick=${fold}
+                    data-part="brand-mark"
+                    title="Home"
+                    aria-label="Home"
+                    onClick=${toSessions}
                 >
                     π
                 </button>`
-                : html`<span class="rail-brand" aria-hidden="true">π</span>`
+                : html`<span class="rail-brand" data-part="brand-mark" aria-hidden="true">π</span>`
         }
+        <span class="rail-gap"></span>
         ${
-            !folded &&
-            html`<span class="rail-gap"></span>
-                ${
-                    foldable
-                        ? html`<button
-                              class="rail-button on"
-                              title=${`Sessions · fold to numbers (${keys})`}
-                              aria-current="page"
-                              onClick=${fold}
-                          >
-                              <${Icon} name="chat" size=${18} />
-                          </button>`
-                        : html`<span class="rail-button on" title="Sessions" aria-current="page">
-                              <${Icon} name="chat" size=${18} />
-                          </span>`
-                }
-                <span class="rail-fill"></span>`
+            foldable
+                ? html`<button
+                    class=${`rail-button ${folded ? "" : "on"}`}
+                    data-part="rail-button"
+                    data-state=${railState(!folded)}
+                    title=${`Sessions (${keys} ${folded ? "unfolds" : "folds"} the list)`}
+                    aria-label="Sessions"
+                    aria-expanded=${!folded}
+                    onClick=${fold}
+                >
+                    <${Icon} name="chat" size=${19} />
+                </button>`
+                : html`<span
+                    class="rail-button on"
+                    data-part="rail-button"
+                    data-state="open"
+                    title="Sessions"
+                    aria-current="page"
+                >
+                    <${Icon} name="chat" size=${19} />
+                </span>`
         }
+        ${!folded && html`<span class="rail-fill"></span>`}
         ${
             folded &&
             canStart &&
             html`<button
                 class="rail-button rail-new"
-                title="New session (Alt N)"
+                data-part="rail-button"
+                title="New session (Alt+N)"
                 aria-label="New session"
                 onClick=${() => openSheet({ type: "cwd", mode: "new" })}
             >
-                <${Icon} name="plus" size=${18} />
+                <${Icon} name="plus" size=${19} />
             </button>`
         }
         ${folded && html`<${RailTiles} />`}
+        ${foldable && html`<${PeeksRailButton} />`}
         <${PipRailButton} />
         <button
-            class="rail-button rail-running"
+            class=${`rail-button rail-running ${busy > 0 ? "lit" : ""}`}
+            data-part="rail-button"
+            data-state=${railState(false, busy > 0)}
             title="Running now"
             aria-label=${busy > 0 ? `Running now, ${busy}` : "Running now"}
             onClick=${() => openSheet({ type: "running" })}
         >
-            <${Icon} name="pulse" size=${18} />
+            <${Icon} name="pulse" size=${19} />
             ${busy > 0 && html`<span class="rail-count">${busy}</span>`}
         </button>
         <button
             class=${`rail-button rail-agents ${live > 0 ? "lit" : ""} ${board ? "open" : ""}`}
+            data-part="rail-button"
+            data-state=${railState(board, live > 0)}
             title="Subagents in every session"
             aria-label=${[
                 "Subagents",
@@ -1186,55 +1337,64 @@ export function RailNav({ foldable = false, folded = false }) {
             aria-pressed=${board}
             onClick=${toggleBoard}
         >
-            <${Icon} name="fork" size=${18} />
+            <${Icon} name="fork" size=${19} />
             ${live > 0 && html`<span class="rail-count">${live}</span>`}
             ${
                 (failed > 0 || agents.waiting > 0) &&
                 html`<span class="rail-trouble" aria-hidden="true"></span>`
             }
         </button>
+        <${ExtensionRailButtons} />
         ${
             collab()
                 ? html`<button
                     class="rail-button"
+                    data-part="rail-button"
                     title=${canStart ? "People and invites" : "People"}
                     aria-label="People"
                     onClick=${() => openSheet({ type: "people" })}
                 >
-                    <${Icon} name="users" size=${18} />
+                    <${Icon} name="users" size=${19} />
                 </button>`
                 : html`<button
                     class="rail-button"
+                    data-part="rail-button"
                     title="Sign in another device"
                     aria-label="Devices"
                     onClick=${() => openSheet({ type: "invite" })}
                 >
-                    <${Icon} name="users" size=${18} />
+                    <${Icon} name="users" size=${19} />
                 </button>`
+        }
+        ${
+            me?.role === "owner" &&
+            html`<button
+                class="rail-button"
+                data-part="rail-button"
+                title="Model providers"
+                aria-label="Providers"
+                onClick=${() => openSheet({ type: "providers" })}
+            >
+                <${Icon} name="key" size=${19} />
+            </button>`
         }
         <button
             class="rail-button"
-            title="Model providers"
-            aria-label="Providers"
-            onClick=${() => openSheet({ type: "providers" })}
-        >
-            <${Icon} name="key" size=${18} />
-        </button>
-        <button
-            class="rail-button"
+            data-part="rail-button"
             title="Theme, tiling, motion"
             aria-label="Theme"
             onClick=${() => openSheet({ type: "appearance" })}
         >
-            <${Icon} name="palette" size=${18} />
+            <${Icon} name="palette" size=${19} />
         </button>
         <button
             class="rail-button rail-me"
+            data-part="rail-button"
             title=${`${me?.name ?? ""} · ${role}`}
             aria-label="Your name"
             onClick=${() => openSheet({ type: "name" })}
         >
-            ${me && html`<${Avatar} person=${me} size=${26} />`}
+            ${me && html`<${Avatar} person=${me} size=${30} />`}
         </button>
     </nav>`;
 }
@@ -1243,11 +1403,15 @@ export function RailNav({ foldable = false, folded = false }) {
 const LIST_MIN = 204;
 const LIST_MAX = 464;
 
-/** The sidebar's usual width: its border, the rail, a 264px list, and its other border. */
-export const SIDEBAR_WIDTH = 324;
+/** The sidebar's usual width, the rail and its list together: the one a new browser starts with (theme.js). */
+export const SIDEBAR_WIDTH = 312;
 
 /** Drag the sidebar's right edge to resize its list; a double click puts it back to its usual width. */
 export function ResizeHandle() {
+    const ref = useRef(null);
+    // A theme may put the sidebar on the right: the handle goes to its other edge, and drags the other way.
+    const side = useSide(ref, (handle) => handle.parentElement);
+
     const start = (event) => {
         if (event.button !== 0) {
             return;
@@ -1256,17 +1420,20 @@ export function ResizeHandle() {
         event.preventDefault();
         const root = document.documentElement;
         const sidebar = event.currentTarget.parentElement;
-        const left = sidebar.getBoundingClientRect().left;
+        const box = sidebar.getBoundingClientRect();
         // The rail and the borders, which keep their width.
         const rest = sidebar.offsetWidth - (sidebar.querySelector(".sessions")?.offsetWidth ?? 0);
         let width = prefs().sidebarWidth;
 
         root.classList.add("resizing");
 
+        // No wider than the stylesheet lets it be: 40% of the screen.
+        const max = Math.min(LIST_MAX + rest, Math.max(SIDEBAR_WIDTH, innerWidth * 0.4));
+
         const move = (each) => {
-            width = Math.round(
-                Math.min(LIST_MAX + rest, Math.max(LIST_MIN + rest, each.clientX - left)),
-            );
+            const across = side === "right" ? box.right - each.clientX : each.clientX - box.left;
+
+            width = Math.round(Math.min(max, Math.max(LIST_MIN + rest, across)));
             root.style.setProperty("--sidebar-w", `${width}px`);
         };
 
@@ -1284,7 +1451,8 @@ export function ResizeHandle() {
     };
 
     return html`<div
-        class="resize-handle"
+        class=${`resize-handle ${side === "right" ? "at-left" : ""}`}
+        ref=${ref}
         role="separator"
         aria-orientation="vertical"
         title="Drag to resize"
@@ -1298,14 +1466,38 @@ export function Drawer() {
     const [open, leaving] = usePresence(store.state.drawer || null, 200);
     const ref = useRef(null);
     const close = () => store.set({ drawer: false });
+    // A theme may slide it in from the right: it is dragged back that way.
+    const side = useSide(ref);
 
     useBack(store.state.drawer === true, close);
     // Not under a row's actions, which a long press opens over it: the finger that opened them may still move.
     useDragToClose(ref, {
-        dir: "left",
+        dir: side,
         onClose: close,
         enabled: Boolean(open) && !leaving && !store.state.sheet,
     });
+    // Esc closes it, as it does a sheet; one over it closes first.
+    useEffect(() => {
+        if (!open || leaving) {
+            return undefined;
+        }
+
+        const onKey = (event) => {
+            if (
+                event.key === "Escape" &&
+                !event.defaultPrevented &&
+                !store.state.sheet &&
+                !store.state.launcher
+            ) {
+                event.preventDefault();
+                close();
+            }
+        };
+
+        addEventListener("keydown", onKey);
+
+        return () => removeEventListener("keydown", onKey);
+    }, [open, leaving]);
 
     if (!open) {
         return null;
@@ -1314,9 +1506,16 @@ export function Drawer() {
     return html`<div class=${leaving ? "leaving" : ""} inert=${leaving}>
         <div
             class="overlay drawer-overlay"
-            onClick=${(event) => event.target === event.currentTarget && close()}
+            data-part="scrim"
+            data-for="drawer"
+            onMouseDown=${scrimPress(close)}
         >
-            <aside class="drawer" ref=${ref}>
+            <aside
+                class="drawer"
+                data-part="drawer"
+                data-state=${leaving ? "closing" : undefined}
+                ref=${ref}
+            >
                 <${RailNav} />
                 <${SessionList} compact=${true} />
             </aside>

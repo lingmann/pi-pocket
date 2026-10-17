@@ -21,7 +21,7 @@
     min-height: 40px;
 }
 
-.victor-mode-row > button {
+.victor-mode .victor-mode-row > button {
     flex: none;
     min-height: 40px;
 }

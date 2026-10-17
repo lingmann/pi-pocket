@@ -1,6 +1,6 @@
-// Project trust. A project's own skills (`.agents/skills`) load only in a project Pi trusts, as in Pi's CLI. The bar
-// above the message box asks the owner when a session's project has such skills and nobody decided yet; the sheet
-// (`/trust`, the menu) shows the decision and changes it. Answers are saved where Pi's CLI keeps its own.
+// Project trust gates .agents/skills and model defaults from .pi/settings.json. The bar asks the owner when a
+// session's project has either and nobody decided yet; /trust shows and changes the decision shared with Pi's CLI.
+// Trusting model defaults affects only later new sessions, never the open session.
 import { useEffect } from "preact/hooks";
 import { actions, attempt, closeSheet, notify, openSheet, store } from "./store.js";
 import { html, Icon, Loader, Sheet, shortPath } from "./ui.js";
@@ -81,7 +81,10 @@ async function decide(choice) {
     store.set({ trust: { conversationId, cwd, info }, templates: null });
 
     if (!info.trusted) {
-        notify("info", "Not trusted: the project's own skills stay off. /trust changes that.");
+        notify(
+            "info",
+            "Not trusted: project model defaults and its own skills stay off. /trust changes that.",
+        );
 
         return;
     }
@@ -93,10 +96,14 @@ async function decide(choice) {
     const skills =
         info.skills.length > 0 ? ` Pi has its skills from now on: ${skillNames(info.skills)}.` : "";
 
-    notify("info", `Trusted ${where}.${skills}`);
+    const defaults = info.settings
+        ? " Project model defaults apply only to later new sessions; this session will not change."
+        : "";
+
+    notify("info", `Trusted ${where}.${skills}${defaults}`);
 }
 
-/** Above the message box, for the owner: this project has its own skills, waiting for an answer. */
+/** Above the message box, for the owner: this project's skills or settings wait for a trust decision. */
 export function TrustBar() {
     const { conversationId } = store.state;
     const cwd = store.state.view.agent?.cwd;
@@ -115,7 +122,11 @@ export function TrustBar() {
 
     return html`<div class="trust-bar">
         <span class="grow">
-            <strong>Trust this project?</strong> Its skills in .agents/skills (${skillNames(info.skills)}) load only in a project Pi trusts.
+            <strong>Trust this project?</strong>${" "}${
+                info.settings
+                    ? `Its .pi/settings.json can set the model and thinking level of later new sessions. This session will not change.${info.skills.length > 0 ? ` Its skills in .agents/skills (${skillNames(info.skills)}) also need trust.` : ""}`
+                    : `Its skills in .agents/skills (${skillNames(info.skills)}) load only in a project Pi trusts.`
+            }
         </span>
         <span class="trust-actions">
             <button class="link small" onClick=${() => attempt(() => decide("distrust"))}>
@@ -138,7 +149,8 @@ export function TrustBar() {
 
 /** An answer in the sheet: what it does, the folder it is about when that is not this one, and whether it is saved. */
 function Choice({ label, detail, current, onClick }) {
-    return html`<button class="list-item trust-choice" onClick=${onClick}>
+    return html`<button class=${`list-item trust-choice ${current ? "active" : ""}`} onClick=${onClick}>
+        <span class="trust-radio" aria-hidden="true"></span>
         <span class="trust-choice-text">
             <span>${label}</span>
             ${detail && html`<span class="muted small mono">${detail}</span>`}
@@ -176,7 +188,11 @@ function ownSkillsText(info) {
 
     return texts.length > 0
         ? texts
-        : ["It has no skills of its own, so this changes nothing in Pi Pocket here."];
+        : [
+              info.settings
+                  ? "It has no skills of its own."
+                  : "It has no skills of its own, so this changes nothing in Pi Pocket here.",
+          ];
 }
 
 /** Where the decision comes from, in a sentence. */
@@ -231,6 +247,12 @@ export function TrustSheet() {
         <p class="mono small">${short(info.folder)}</p>
         <p>${status(info, short)}</p>
         ${ownSkillsText(info).map((text) => html`<p>${text}</p>`)}
+        ${
+            info.settings &&
+            html`<p>
+                In .pi/settings.json: model and thinking defaults apply only to later new sessions, after trust. This session will not change. The owner's Default model still wins; clear it in Menu → Default model to use project defaults. No project setting can grant trust to itself. Extra skill and prompt paths and per-project run policy are not supported yet.
+            </p>`
+        }
         <p class="muted small">
             Pi's CLI goes by the same decision, saved in ~/.pi/agent/trust.json. There, trusting a project also loads its .pi settings, extensions, and packages, which run code on this machine. Trust only folders whose contents you trust.
         </p>
