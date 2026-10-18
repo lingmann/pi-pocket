@@ -102,6 +102,16 @@ To roll back, restore the previous source/code and repeat these steps. Retained 
 
 See [the fork workflow](fork-workflow.md) for shared-main collaboration: squash feature PRs, preserve upstream-update merges, check changes, and tag tested releases. These repository operations are separate from preparing assets and restarting a running app.
 
+### Styling boundary
+
+Keep Victor's markup in `web/victor-controls.js` and its layout in `web/victor.css`. Reuse upstream's documented `button`, `small`, and `error-box` classes, shared icons and spinner, and [theme tokens](extensions/reference/theme-surface.md). The existing stylesheet import stays in the `pocket` layer so user themes can override it. The idle toggle exposes the generic `composer-button` part; it is not a `plan-chip`.
+
+Do not borrow Plan's feature-specific classes or edit shared styling to make Victor look like Plan: those classes also control visibility and layout. A few Victor-owned dimensions and composer-container thresholds are intentional. Keep neighbouring-control overrides together in `victor.css`; they give up thinking-level text before Plan as the composer narrows. The active panel is outside that container and wraps its own controls.
+
+Use token-based surfaces, corners, density spacing, and draft text size. Preserve upstream focus and field styling, and check the idle toggle's expanded touch target as well as the visible button. The controls show one live status, a shared spinner while preparing/sending/waiting, and a shared error box when stopped. Error state still owns the draft until Victor is turned off.
+
+After upstream merges, use the focused composer UI tests to check phone and narrow-desktop layouts, Pocket/Lantern and light/dark colors, density, text size, and keyboard/touch access. Shared primitives and tokens track upstream automatically; Victor's own geometry still needs review when upstream changes the composer. Keep these tests in Victor's test files rather than adding fork assertions to upstream suites.
+
 ## Source files
 
 Use this map to locate the behavior being changed, identify boundaries it crosses, and choose [focused tests](#focused-test-coverage). The source and tests remain the authority for implementation details. Paths are relative to the repository root.

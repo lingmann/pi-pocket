@@ -1,6 +1,6 @@
 // Victor's controls subscribe to the controller; audio and conversation ownership stay there.
 import { useEffect, useState } from "preact/hooks";
-import { html, Icon } from "./ui.js";
+import { html, Icon, Spinner } from "./ui.js";
 import { victorMode } from "./victor-mode.js";
 
 /** The controller owns speech resources; rendering only subscribes to its current state. */
@@ -36,11 +36,12 @@ export function VictorControls({ state, toggle }) {
     return html`<section
         class=${`victor-mode on ${state.phase === "error" ? "error" : ""}`}
         aria-label="On-device Victor"
+        data-phase=${state.phase}
     >
         <div class="victor-mode-row">
             <button
                 type="button"
-                class="chip toggle victor-toggle on"
+                class="button small victor-toggle"
                 aria-pressed="true"
                 title="Turn Victor off (does not stop Pi)"
                 onClick=${toggle}
@@ -70,21 +71,33 @@ export function VictorControls({ state, toggle }) {
                 Read reply
             </button>
         </div>
-        <div class="victor-status" role="status">${VICTOR_STATUS[state.phase]}</div>
+        ${
+            state.phase !== "error" &&
+            html`<div class="victor-status" role="status">
+                ${["preparing", "submitting", "waiting"].includes(state.phase) && html`<${Spinner} hidden />`}
+                <span>${state.message || VICTOR_STATUS[state.phase]}</span>
+            </div>`
+        }
         ${
             (state.text || state.phase === "listening") &&
             html`<div class="victor-draft" role="region" aria-label="Victor draft">
                 ${state.text || "Speak now…"}
             </div>`
         }
-        <p class="victor-message" role="status">${state.message}</p>
+        ${
+            state.phase === "error" &&
+            html`<div class="victor-message error-box" role="alert">
+                <strong>${VICTOR_STATUS.error}.</strong> ${state.message}
+            </div>`
+        }
     </section>`;
 }
 
 export function VictorButton({ toggle }) {
     return html`<button
         type="button"
-        class="chip toggle victor-chip"
+        class="button small victor-chip"
+        data-part="composer-button"
         aria-pressed="false"
         title="Turn on Victor (on-device, English)"
         onClick=${toggle}
