@@ -548,6 +548,8 @@ async function layout() {
         };
         return {
             viewport: innerWidth,
+            coarse: matchMedia('(pointer: coarse)').matches,
+            composerWidth: document.querySelector('.composer').clientWidth,
             scrollWidth: document.documentElement.scrollWidth,
             plan: visible('.plan-chip'),
             thinking: visible('.model-level'),
@@ -577,7 +579,7 @@ test(
     "Victor layouts fit narrow phones and desktop, with usable controls and restored draft focus",
     real,
     async () => {
-        for (const width of [320, 390, 1280]) {
+        for (const width of [320, 375, 390, 600, 1280]) {
             await page.setViewport({ width, height: 844, scale: 1, mobile: width < 600 });
             await fresh();
             await run(
@@ -588,8 +590,8 @@ test(
 
             fits(off, width, "off");
             assert.equal(off.chip, true);
-            assert.equal(off.plan, width > 379, `${width}px Plan visibility`);
-            assert.equal(off.thinking, width > 699, `${width}px thinking visibility`);
+            assert.equal(off.plan, off.composerWidth > 340, `${width}px Plan visibility`);
+            assert.equal(off.thinking, off.composerWidth > 420, `${width}px thinking visibility`);
             const draft = "Preserve these unfinished words " + "longword".repeat(30);
 
             await activate(draft);
@@ -602,8 +604,8 @@ test(
 
             for (const control of on.controls) {
                 assert.ok(
-                    control.height >= 40 && control.width >= 40,
-                    `${width}px Victor touch target ${JSON.stringify(control)}`,
+                    control.height >= (on.coarse ? 40 : 30) && control.width >= 40,
+                    `${width}px Victor control ${JSON.stringify(control)}`,
                 );
             }
 
@@ -640,3 +642,203 @@ test(
         }
     },
 );
+
+test(
+    "Victor follows themes, density and text size without borrowing Plan styles",
+    real,
+    async () => {
+        for (const [width, look, theme, density, text] of [
+            [320, "pocket", "tokyo-night", "comfortable", 15],
+            [390, "pocket", "flexoki-light", "tight", 17],
+            [1280, "lantern", "lantern", "compact", 13],
+        ] as const) {
+            await page.setViewport({ width, height: 844, scale: 1, mobile: width < 600 });
+            await fresh();
+            await run(
+                `(await import('/theme.js')).setPrefs(${JSON.stringify({ look, theme, density, text })})`,
+            );
+            await see(`document.documentElement.dataset.theme === ${JSON.stringify(look)}`);
+
+            // Folder themes load asynchronously. Wait for Lantern's documented corner token too.
+            if (look === "lantern") {
+                await see(
+                    `getComputedStyle(document.documentElement).getPropertyValue('--r-card').trim() === '8px'`,
+                );
+            }
+
+            fits(await layout(), width, `${look} off`);
+            assert.equal(
+                await value(`document.querySelector('.victor-chip').dataset.part`),
+                "composer-button",
+            );
+            assert.equal(
+                await value(
+                    `document.querySelector('.victor-chip').classList.contains('plan-chip')`,
+                ),
+                false,
+            );
+            await activate("A draft at the person's chosen text size.");
+            const measured = await layout();
+            const styles = await value(`(() => {
+            const css = selector => getComputedStyle(document.querySelector(selector));
+            const root = getComputedStyle(document.documentElement);
+            return {
+                radius: css('.victor-mode').borderRadius,
+                expectedRadius: root.getPropertyValue('--r-card').trim(),
+                padding: parseFloat(css('.victor-mode').paddingTop),
+                expectedPadding: 8 * parseFloat(root.getPropertyValue('--space-y')),
+                draft: parseFloat(css('.victor-draft').fontSize),
+                status: parseFloat(css('.victor-status').fontSize),
+                field: parseFloat(css('.victor-speed select').fontSize),
+            };
+        })()`);
+
+            fits(measured, width, `${look} listening`);
+            assert.equal(styles.radius, styles.expectedRadius);
+            assert.ok(Math.abs(styles.padding - styles.expectedPadding) < 0.1);
+            assert.equal(styles.draft, measured.coarse ? Math.max(16, text) : text);
+            assert.ok(styles.status >= 13);
+
+            if (measured.coarse) {
+                assert.ok(styles.field >= 16, "fields retain upstream's iOS zoom protection");
+            }
+
+            await run(
+                `speechWorker.onmessage({ data: { type: 'error', message: 'Microphone interrupted. Draft kept.' } })`,
+            );
+            await phase("error");
+            await see(`!!document.querySelector('.victor-message.error-box[role="alert"]')`);
+            assert.equal(
+                await value(
+                    `document.querySelector('.victor-toggle').getAttribute('aria-pressed')`,
+                ),
+                "true",
+            );
+            assert.equal(
+                await value(`document.querySelectorAll('.victor-mode [role="status"]').length`),
+                0,
+            );
+            // Compare with the shared error primitive, not hard-coded palette values.
+            await run(
+                `window.reference = document.createElement('div'); reference.className = 'error-box'; document.body.append(reference)`,
+            );
+            const errors =
+                await value(`['color', 'backgroundColor', 'borderColor', 'borderRadius', 'fontSize'].map(key =>
+            [getComputedStyle(document.querySelector('.victor-message'))[key], getComputedStyle(reference)[key]])`);
+
+            for (const [actual, expected] of errors) {
+                assert.equal(actual, expected);
+            }
+
+            await run(`reference.remove(); document.querySelector('.victor-toggle').click()`);
+            await phase("off");
+        }
+
+        await run(
+            `(await import('/theme.js')).setPrefs({ look: 'pocket', theme: 'tokyo-night', density: 'comfortable', text: 15 })`,
+        );
+    },
+);
+
+test(
+    "Victor's idle touch target and keyboard focus stay separate from neighbouring controls",
+    real,
+    async () => {
+        await page.setViewport(VIEWPORTS.mobile);
+        await fresh();
+
+        for (const density of ["comfortable", "compact", "tight"]) {
+            await run(
+                `(await import('/theme.js')).setPrefs({ density: ${JSON.stringify(density)} })`,
+            );
+            await layout();
+            const hits = await value(`(() => {
+        const chip = document.querySelector('.victor-chip');
+        const rect = chip.getBoundingClientRect();
+        const owns = (element, x, y) => element.contains(document.elementFromPoint(x, y));
+        return {
+            height: rect.height,
+            targetHeight: parseFloat(getComputedStyle(chip, '::before').height),
+            above: owns(chip, rect.x + rect.width / 2, rect.top - 4.9),
+            below: owns(chip, rect.x + rect.width / 2, rect.bottom + 4.9),
+            neighbours: [...document.querySelectorAll('.composer-row button:not(.victor-chip):not(:disabled)')]
+                .filter(element => element.getClientRects().length)
+                .every(element => {
+                    const r = element.getBoundingClientRect();
+                    return owns(element, r.left + 2, r.y + r.height / 2) && owns(element, r.right - 2, r.y + r.height / 2);
+                }),
+        };
+    })()`);
+
+            assert.ok(hits.height >= 30);
+            assert.ok(hits.targetHeight >= 40);
+            assert.equal(
+                hits.above,
+                true,
+                `${density}: top of expanded touch target belongs to Victor`,
+            );
+            assert.equal(
+                hits.below,
+                true,
+                `${density}: bottom of expanded touch target belongs to Victor`,
+            );
+            assert.equal(
+                hits.neighbours,
+                true,
+                `${density}: Victor takes no neighbouring button's taps`,
+            );
+        }
+
+        await run(`(await import('/theme.js')).setPrefs({ density: 'comfortable' })`);
+        await page.setViewport(VIEWPORTS.desktop);
+        await fresh();
+        await run(`document.querySelector('.plan-chip').focus()`);
+        await page.press("Tab");
+        assert.equal(
+            await value(`document.activeElement.matches('.victor-chip:focus-visible')`),
+            true,
+        );
+        assert.notEqual(
+            await value(`getComputedStyle(document.activeElement).outlineStyle`),
+            "none",
+        );
+        await page.press("Enter");
+        await phase("preparing");
+        await see(`!!document.querySelector('.victor-status .spinner[aria-hidden="true"]')`);
+        assert.equal(
+            await value(`document.querySelectorAll('.victor-mode [role="status"]').length`),
+            1,
+        );
+        await run(`document.querySelector('.victor-toggle').click()`);
+        await phase("off");
+    },
+);
+
+test("Victor responds to composer width rather than desktop viewport width", real, async () => {
+    await page.setViewport(VIEWPORTS.desktop);
+    await fresh();
+    await run(
+        `pocket.store.set({ view: { ...pocket.store.state.view, agent: { ...pocket.store.state.view.agent, reasoning: true, thinkingLevel: 'high' } } })`,
+    );
+    await see(`!!document.querySelector('.model-level')`);
+    const roomy = await layout();
+
+    assert.equal(roomy.plan, true);
+    assert.equal(roomy.thinking, true);
+    // Constrain the real composer region without changing the desktop's viewport or pointer type.
+    await run(`document.querySelector('[data-part="composer"]').style.width = '360px'`);
+    const narrow = await layout();
+
+    assert.equal(narrow.viewport, roomy.viewport);
+    assert.equal(narrow.plan, false);
+    assert.equal(narrow.thinking, false);
+    assert.equal(narrow.chip, true);
+    const contained = await value(`(() => {
+        const box = document.querySelector('.composer').getBoundingClientRect();
+        return [...document.querySelectorAll('.composer-row > *')].filter(element => element.getClientRects().length)
+            .every(element => { const r = element.getBoundingClientRect(); return r.left >= box.left && r.right <= box.right; });
+    })()`);
+
+    assert.equal(contained, true, "all controls stay inside the narrow composer");
+    await run(`document.querySelector('[data-part="composer"]').style.width = ''`);
+});
