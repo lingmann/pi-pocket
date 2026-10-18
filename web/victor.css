@@ -1,16 +1,12 @@
-/* On-device victor has its own draft; the regular box stays read-only until Victor is turned off. */
+/* Victor owns its layout; shared controls and theme tokens own its visual language. */
 .victor-mode {
-    margin-bottom: 4px;
-}
-
-.victor-mode.on {
-    padding: 6px 8px;
-    border: 1px solid var(--accent-line);
+    margin-bottom: 5px;
+    padding: calc(8px * var(--space-y)) calc(10px * var(--space-x));
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card);
     background: var(--card);
-}
-
-.victor-mode.error {
-    border-color: var(--err);
+    font-size: 13px;
+    line-height: 1.4;
 }
 
 .victor-mode-row {
@@ -18,45 +14,38 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 6px;
-    min-height: 40px;
 }
 
-.victor-mode .victor-mode-row > button {
+.victor-mode-row > button {
     flex: none;
-    min-height: 40px;
 }
 
-.victor-toggle {
-    color: var(--muted);
+.victor-mode:not(.error) .victor-toggle {
+    color: var(--accent);
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
 }
 
 .victor-speed {
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: 0.75rem;
     color: var(--muted);
 }
 
 .victor-speed select {
     width: auto;
-    min-height: 40px;
+    min-height: 30px;
     padding: 4px;
 }
 
-.victor-status,
-.victor-message {
-    font-size: 0.75rem;
-    color: var(--muted);
-}
-
 .victor-status {
-    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin-top: 6px;
+    color: var(--muted);
     overflow-wrap: anywhere;
-}
-
-.victor-mode.error .victor-status {
-    color: var(--err);
 }
 
 .victor-draft {
@@ -65,13 +54,13 @@
     overflow: auto;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    font-size: 0.9rem;
-    line-height: 1.5;
+    color: var(--text);
+    font-size: var(--text-size, 15px);
+    line-height: var(--leading);
 }
 
 .victor-message {
-    margin: 6px 0 0;
-    overflow-wrap: anywhere;
+    margin-top: 6px;
 }
 
 .composer.victor-active textarea {
@@ -79,25 +68,57 @@
     cursor: default;
 }
 
-.composer-row .victor-chip {
+/* A composer pill, not a Plan chip: Plan's classes also control when it disappears. */
+.button.victor-chip {
     flex: none;
-    height: 26px;
+    min-height: 30px;
+    height: 30px;
     padding: 0 9px;
-    font-size: 0.74rem;
+    border-color: var(--hair-2);
+    border-radius: var(--r-pill);
+    font-size: 13px;
+    font-weight: 400;
     background: none;
     color: var(--muted);
 }
 
-@media (max-width: 379px) {
-    /* Keep Victor and the send controls whole on the narrowest phones; /plan remains available. */
-    .composer-row:has(.victor-chip) .plan-chip {
+@media (hover: hover) {
+    .button.victor-chip:hover {
+        color: var(--text);
+    }
+}
+
+@media (pointer: coarse) {
+    .victor-mode .victor-mode-row > button,
+    .victor-speed select {
+        min-height: 40px;
+    }
+
+    .victor-draft {
+        font-size: max(16px, var(--text-size, 15px));
+    }
+
+    /* Keep the pill small, with a thumb-tall target that does not cover its neighbours. */
+    .victor-chip {
+        position: relative;
+    }
+
+    .victor-chip::before {
+        content: "";
+        position: absolute;
+        inset: -6px 0;
+    }
+}
+
+/* The only neighbouring-control overrides: give up optional labels as this composer narrows. */
+@container composer (max-width: 420px) {
+    [data-part~="composer-tools"]:has(.victor-chip) .model-level {
         display: none;
     }
 }
 
-@media (max-width: 699px) {
-    /* The idle Victor chip fits in the existing row; the model's thinking level gives it room. */
-    .composer-row:has(.victor-chip) .model-level {
+@container composer (max-width: 340px) {
+    [data-part~="composer-tools"]:has(.victor-chip) [data-part~="plan-chip"] {
         display: none;
     }
 }
