@@ -32,6 +32,7 @@ import { prefs } from "./theme.js";
 import { says } from "./turns.js";
 import { MicButton, useDictation } from "./voice.js";
 import { victorMode } from "./victor-mode.js";
+import { createVictorComposer } from "./victor-composer.js";
 import { useVictorMode, VictorButton, VictorControls } from "./victor-controls.js";
 import {
     APPLE,
@@ -111,6 +112,18 @@ function savePastes(id, pastes) {
 
 /** The message with each paste's placeholder replaced by what was pasted. */
 const expandPastes = (text, pastes) => text.replace(PASTED, (whole, n) => pastes[n] ?? whole);
+
+const victorComposer = createVictorComposer({
+    mode: victorMode,
+    notify,
+    readDraft: (id) => drafts.get(id),
+    expandDraft: (id, text) => expandPastes(text, loadPastes(id)),
+    writeDraft(id, value) {
+        drafts.set(id, value);
+        // Returned text is expanded; old mappings must not expand literal placeholders again.
+        savePastes(id, {});
+    },
+});
 
 /**
  * The subagents a waiting message carries reports from (`extensions/subagents.ts`), as the server reads them from its
@@ -353,8 +366,6 @@ export function Composer() {
     const { view, conversationId } = store.state;
     const victor = useVictorMode();
     const victorActive = victor.phase !== "off";
-    const victorOwner = useRef(null);
-    const mounted = useRef(true);
     const historyScope = { person: store.state.me?.id, conversation: conversationId };
     const [text, setText] = useState(() => drafts.get(conversationId));
     const [files, setFiles] = useState([]);
@@ -413,64 +424,34 @@ export function Composer() {
     const busy = view.live.busy;
     const agent = view.agent;
 
-    useEffect(() => {
-        mounted.current = true;
+    useEffect(
+        () =>
+            victorComposer.mount(conversationId, (value) => {
+                setText(value);
+                setCaret(value.length);
+                setPastes({});
+            }),
+        [conversationId],
+    );
 
-        return () => {
-            mounted.current = false;
+    const toggleVictor = () =>
+        victorComposer.toggle({
+            conversationId: store.state.conversationId,
+            sending,
+            hasAttachments: files.length > 0,
+            takeDraft() {
+                dictation.stop(true);
+                setBrowsing(null);
+                setSearching(false);
 
-            if (victorOwner.current === conversationId && victorMode.active) {
-                victorMode.disable();
-            }
-        };
-    }, [conversationId]);
-
-    const toggleVictor = () => {
-        if (victorMode.active) {
-            victorMode.disable();
-            victorOwner.current = null;
-
-            return;
-        }
-
-        const { conversationId: id } = store.state;
-        let reason = victorMode.unavailable(id);
-
-        if (!reason && sending) {
-            reason = "Wait until your message is sent before turning Victor on.";
-        } else if (!reason && (text !== "" || drafts.get(id) !== "" || files.length > 0)) {
-            reason = "Send or clear your draft and attachments before turning Victor on.";
-        }
-
-        if (reason) {
-            notify("info", reason);
-
-            return;
-        }
-
-        victorOwner.current = id;
-        setBrowsing(null);
-        setSearching(false);
-        victorMode.enable({
-            conversationId: id,
-            preserveDraft(value) {
-                if (!value.trim()) {
-                    return;
-                }
-
-                // Navigation may have unmounted this box. Save to the captured conversation, never the new one.
-                const current = drafts.get(id);
-                const next = current.trim() ? `${current.replace(/\s+$/, "")}\n\n${value}` : value;
-
-                drafts.set(id, next);
-
-                if (mounted.current && store.state.conversationId === id) {
-                    setText(next);
-                    setCaret(next.length);
-                }
+                return { text, initialText: expandPastes(text, pastes) };
+            },
+            validateText(value) {
+                return inlineFiles && MENTIONS_FILE.test(value)
+                    ? "Turn Victor off to send mentioned files, or choose ‘Let Pi read them’ first."
+                    : null;
             },
         });
-    };
 
     useEffect(() => {
         const draft = drafts.get(conversationId);
@@ -549,7 +530,7 @@ export function Composer() {
         addEventListener("resize", fit);
 
         return () => removeEventListener("resize", fit);
-    }, [text]);
+    }, [text, victorActive]);
 
     const update = (value, at = value.length) => {
         setText(value);
@@ -585,7 +566,10 @@ export function Composer() {
 
     PASTED.lastIndex = 0;
     // The @path being typed at the caret, and the files that match it. Slash command names come first.
-    const typed = suggestions.length === 0 && !searching && !shell ? mentionAt(text, caret) : null;
+    const typed =
+        !victorActive && suggestions.length === 0 && !searching && !shell
+            ? mentionAt(text, caret)
+            : null;
     const mention = typed && typed.start !== hiddenMention ? typed : null;
     const found = mention ? suggestFiles(mention.query) : null;
     const matches = found?.items ?? [];
@@ -666,6 +650,10 @@ export function Composer() {
      * and its own files show next.
      */
     const chooseFile = (item) => {
+        if (victorMode.active) {
+            return;
+        }
+
         const written = mentionText(item.path);
         const rest = text.slice(mention.end);
         const space = item.dir || /^\s/.test(rest) ? "" : " ";
@@ -707,6 +695,7 @@ export function Composer() {
     const uploading = files.some((file) => file.state === "uploading");
     const canSend =
         !victorActive &&
+        !victorMode.blocksSend(conversationId) &&
         !sending &&
         !uploading &&
         (text.trim() !== "" || files.some((file) => file.state === "done"));
@@ -753,7 +742,7 @@ export function Composer() {
     };
 
     const send = async () => {
-        if (victorMode.active || !canSend) {
+        if (victorMode.active || victorMode.blocksSend(conversationId) || !canSend) {
             return;
         }
 
@@ -1252,6 +1241,7 @@ export function Composer() {
                         ${" "}
                         <button
                             class="link small"
+                            disabled=${victorActive}
                             onMouseDown=${(event) => event.preventDefault()}
                             onClick=${() => {
                                 localStorage.setItem(INLINE_KEY, inlineFiles ? "0" : "1");
@@ -1399,7 +1389,7 @@ export function Composer() {
                     <textarea
                         ref=${setBox}
                         rows="1"
-                        value=${text}
+                        value=${victorActive ? "" : text}
                         readOnly=${victorActive}
                         placeholder=${placeholder}
                         onInput=${(event) => {

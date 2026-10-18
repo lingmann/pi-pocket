@@ -54,11 +54,21 @@ type VictorState = {
     message: string;
     hasReply: boolean;
     speed: number;
+    deliveryPending: boolean;
+};
+type DraftOptions = {
+    initialText?: string;
+    consumeDraft?: () => void;
+    preserveDraft?: (text: string) => void;
+    validateText?: (text: string) => string | null;
 };
 type VictorMode = {
     state: VictorState;
     active: boolean;
-    enable: (options: { conversationId: string; preserveDraft: (text: string) => void }) => void;
+    blocksSend: (conversationId: string) => boolean;
+    enable: (
+        options: DraftOptions & { conversationId: string; preserveDraft: (text: string) => void },
+    ) => void;
     disable: () => void;
     readReply: () => void;
     setSpeed: (value: unknown) => void;
@@ -408,6 +418,8 @@ class Harness {
     submissions: { path: string; body: Submission }[] = [];
     notices: [string, string][] = [];
     preserved: string[] = [];
+    consumed = 0;
+    deliveryWait: ReturnType<typeof deferred<void>> | null = null;
     blocked = false;
     requestId = 0;
     startup: string[] = [];
@@ -435,6 +447,7 @@ class Harness {
         assert.equal(path, "c/session/submit", "victor must never call Pi's abort endpoint");
         assert.equal(body.source, "victor", "every Victor submission tags its input source");
         this.submissions.push({ path, body });
+        await this.deliveryWait?.promise;
     }
 
     changed() {
@@ -459,18 +472,22 @@ class Harness {
         return this.audio.playbacks.at(-1)!;
     }
 
-    enable() {
+    enable(options: DraftOptions = {}) {
         this.victor.enable({
             conversationId: "session",
             preserveDraft: (text) => this.preserved.push(text),
+            consumeDraft: () => {
+                this.consumed++;
+            },
+            ...options,
         });
         assert.equal(this.victor.state.phase, "preparing");
         assert.equal(this.audio.state, "running", "audio activates on the Victor tap");
         assert.deepEqual(this.worker.messages, [{ type: "init" }]);
     }
 
-    async listen() {
-        this.enable();
+    async listen(options: DraftOptions = {}) {
+        this.enable(options);
         this.worker.emit({ type: "ready" });
         await settle();
         assert.equal(this.victor.state.phase, "listening");
@@ -691,6 +708,226 @@ async function setup(
 
     return h;
 }
+
+test("a starting draft survives preparation, failure and off without trimming", async (t) => {
+    const h = await setup(t);
+    const text = "  typed draft\n\n";
+
+    h.enable({ initialText: text });
+    assert.equal(h.victor.state.text, text);
+    h.worker.emit({ type: "error", message: "assets unavailable" });
+    h.victor.disable();
+    assert.deepEqual(h.preserved, [text]);
+    assert.equal(h.consumed, 0);
+});
+
+test("recognition revisions replace only new speech, preserving the starting draft", async (t) => {
+    const h = await setup(t);
+
+    await h.listen({ initialText: "Typed paragraph.\n\n" });
+    h.partial("some");
+    h.partial("some revised words");
+    assert.equal(h.victor.state.text, "Typed paragraph.\n\nsome revised words");
+    h.partial("");
+    assert.equal(h.victor.state.text, "Typed paragraph.\n\n");
+    h.partial("continued");
+    h.victor.disable();
+    assert.deepEqual(h.preserved, ["Typed paragraph.\n\ncontinued"]);
+});
+
+test("send it in imported text never sends; spoken send it submits that draft once", async (t) => {
+    const h = await setup(t);
+
+    await h.listen({ initialText: "Please send it" });
+    assert.equal(h.victor.state.phase, "listening");
+    assert.equal(h.submissions.length, 0);
+    await h.submit("");
+    assert.equal(h.submissions[0]!.body.text, "Please send it");
+    assert.equal(h.consumed, 1);
+    h.reply();
+    await h.finish();
+    h.partial("next turn");
+    assert.equal(h.victor.state.text, "next turn", "the starting draft is consumed only once");
+});
+
+test("final recognition combines the seed and revised speech, not partial text", async (t) => {
+    const h = await setup(t);
+
+    await h.listen({ initialText: "Typed" });
+    h.partial("old words send it");
+    h.capture.emit({ type: "flushed" });
+    h.worker.emit({ type: "final", turn: h.worker.turn, text: "new words send it" });
+    await settle();
+    assert.equal(h.submissions[0]!.body.text, "Typed new words");
+    h.victor.disable();
+    assert.deepEqual(h.preserved, []);
+});
+
+test("an invalid final command retains both the starting draft and final speech", async (t) => {
+    const h = await setup(t);
+
+    await h.listen({ initialText: "Typed" });
+    h.partial("words send it");
+    h.capture.emit({ type: "flushed" });
+    h.worker.emit({ type: "final", turn: h.worker.turn, text: "words send this" });
+    h.victor.disable();
+    assert.deepEqual(h.preserved, ["Typed words send this"]);
+    assert.equal(h.submissions.length, 0);
+    assert.equal(h.consumed, 0);
+});
+
+for (const initialText of [" /help", "!ls", "!!ls"]) {
+    test(`Victor refuses a command draft: ${initialText}`, async (t) => {
+        const h = await setup(t);
+
+        h.victor.enable({ conversationId: "session", initialText, preserveDraft() {} });
+        assert.equal(h.victor.active, false);
+        assert.equal(h.audios.length, 0);
+        assert.match(h.notices.at(-1)![1], /ordinary text/);
+    });
+}
+
+test("draft validation applies before activation and to the final combined submission", async (t) => {
+    const h = await setup(t);
+    const validated: string[] = [];
+
+    const validateText = (text: string) => {
+        validated.push(text);
+
+        return text.includes("@file.txt") ? "Keep mentioned files" : null;
+    };
+
+    h.victor.enable({
+        conversationId: "session",
+        initialText: "Read @file.txt",
+        validateText,
+        preserveDraft() {},
+    });
+    assert.equal(h.victor.active, false);
+    await h.listen({ initialText: "Read", validateText });
+    h.partial("@file.txt send it");
+    h.capture.emit({ type: "flushed" });
+    h.worker.emit({ type: "final", turn: h.worker.turn, text: "@file.txt send it" });
+    assert.equal(validated.at(-1), "Read @file.txt");
+    assert.equal(h.submissions.length, 0);
+    assert.equal(h.consumed, 0);
+    h.victor.disable();
+    assert.deepEqual(h.preserved, ["Read @file.txt"]);
+});
+
+test("a failed draft consumption prevents the POST and keeps the combined draft", async (t) => {
+    const h = await setup(t);
+
+    await h.listen({
+        initialText: "Typed",
+        consumeDraft() {
+            throw new Error("draft changed");
+        },
+    });
+    h.partial("words send it");
+    h.capture.emit({ type: "flushed" });
+    h.worker.emit({ type: "final", turn: h.worker.turn, text: "words send it" });
+    await settle();
+    assert.equal(h.submissions.length, 0);
+    h.victor.disable();
+    assert.deepEqual(h.preserved, ["Typed words"]);
+});
+
+for (const outcome of ["success", "rejected", "uncertain", "network"] as const) {
+    for (const off of [false, true]) {
+        test(`seeded submission ${outcome}, turned off: ${off}`, async (t) => {
+            const h = await setup(t);
+
+            h.deliveryWait = deferred<void>();
+            await h.listen({ initialText: "Typed" });
+            h.partial("words send it");
+            h.capture.emit({ type: "flushed" });
+            h.worker.emit({ type: "final", turn: h.worker.turn, text: "words send it" });
+            assert.equal(h.consumed, 1, "consume synchronously before waiting for the server");
+            assert.equal(h.victor.blocksSend("session"), true);
+            assert.equal(h.victor.blocksSend("other"), false);
+
+            if (off) {
+                h.victor.disable();
+                h.victor.enable({ conversationId: "session", preserveDraft() {} });
+                assert.equal(h.victor.active, false, "a pending POST still blocks reactivation");
+                assert.deepEqual(h.preserved, []);
+                assert.equal(h.victor.state.deliveryPending, true);
+            }
+
+            if (outcome === "success") {
+                h.deliveryWait.resolve();
+            } else {
+                h.deliveryWait.reject(
+                    Object.assign(new Error(outcome), {
+                        status:
+                            outcome === "rejected" ? 403 : outcome === "network" ? undefined : 500,
+                    }),
+                );
+            }
+
+            await settle();
+            assert.equal(h.victor.state.deliveryPending, false);
+            assert.equal(h.victor.blocksSend("session"), false);
+            h.victor.disable();
+            assert.deepEqual(h.preserved, outcome === "rejected" ? ["Typed words"] : []);
+            assert.equal(h.submissions.length, 1);
+        });
+    }
+}
+
+test("failed late restoration still releases the send guard and reports the failure", async (t) => {
+    const h = await setup(t);
+
+    h.deliveryWait = deferred<void>();
+    await h.listen({
+        initialText: "Typed",
+        preserveDraft() {
+            throw new Error("storage quota exceeded");
+        },
+    });
+    h.partial("send it");
+    h.capture.emit({ type: "flushed" });
+    h.worker.emit({ type: "final", turn: h.worker.turn, text: "send it" });
+    h.victor.disable();
+    assert.equal(h.victor.state.deliveryPending, true);
+    h.deliveryWait.reject(Object.assign(new Error("rejected"), { status: 403 }));
+    await settle();
+    assert.equal(h.victor.state.deliveryPending, false);
+    assert.match(h.notices.at(-1)![1], /draft could not be restored: storage quota exceeded/);
+});
+
+test("runtime failure during a POST restores a late rejection exactly once", async (t) => {
+    const h = await setup(t);
+
+    h.deliveryWait = deferred<void>();
+    await h.listen({ initialText: "  Typed\n\n" });
+    h.partial("words send it");
+    h.capture.emit({ type: "flushed" });
+    h.worker.emit({ type: "final", turn: h.worker.turn, text: "words send it" });
+    assert.equal(h.submissions[0]!.body.text, "Typed\n\nwords");
+    h.worker.emit({ type: "error", message: "runtime failed" });
+    assert.equal(h.victor.state.phase, "error");
+    assert.equal(h.victor.state.deliveryPending, true);
+    h.deliveryWait.reject(Object.assign(new Error("rejected"), { status: 403 }));
+    await settle();
+    h.victor.disable();
+    assert.deepEqual(h.preserved, ["  Typed\n\nwords"]);
+    assert.equal(h.victor.state.deliveryPending, false);
+});
+
+test("whitespace-only starting text survives off and never sends on its own", async (t) => {
+    const h = await setup(t);
+
+    await h.listen({ initialText: " \n\t" });
+    h.partial("send it");
+    h.capture.emit({ type: "flushed" });
+    h.worker.emit({ type: "final", turn: h.worker.turn, text: "send it" });
+    await settle();
+    assert.equal(h.submissions.length, 0);
+    h.victor.disable();
+    assert.deepEqual(h.preserved, [" \n\t"]);
+});
 
 for (const missing of [undefined, null]) {
     test(`Victor refuses activation without a selected model (${String(missing)}) before loading assets`, async (t) => {
