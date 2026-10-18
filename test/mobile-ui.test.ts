@@ -309,6 +309,83 @@ test(
     },
 );
 
+/** A compacted view can keep recent entries whose ids also occur before its summary. */
+async function compactedView(): Promise<void> {
+    await fresh();
+    await goTo(first);
+    await until(
+        async () =>
+            await inPage<boolean>(`
+                return JSON.stringify((await import("/store.js")).store.state.view.conversation?.id === ${first});
+            `),
+        "the session view",
+    );
+    await page.evaluate(`
+        const { store, actions } = await import("/store.js");
+        const retained = { id: 900001, kind: "user", text: "retained message", images: 0, at: Date.now() };
+        const summary = { id: 900002, kind: "compaction", summary: "Earlier messages" };
+
+        window.earlierEntries = [retained];
+        actions.history = async () => window.earlierEntries;
+        store.set({ view: { ...store.state.view,
+            entries: new Map([[summary.id, summary], [retained.id, retained]]),
+            order: [summary.id, retained.id],
+        } });
+    `);
+    await until(
+        async () =>
+            await inPage<boolean>(`
+                return JSON.stringify([...document.querySelectorAll(".transcript button")]
+                    .some(each => each.textContent === "Show earlier messages"));
+            `),
+        "earlier history available",
+    );
+}
+
+test("earlier history does not repeat a message kept after compaction", real, async () => {
+    await compactedView();
+    await page.evaluate(`
+        [...document.querySelectorAll(".transcript button")]
+            .find(each => each.textContent === "Show earlier messages").click();
+    `);
+    await until(
+        async () =>
+            await inPage<boolean>(
+                `return JSON.stringify(document.querySelector(".history") !== null)`,
+            ),
+        "earlier history shown",
+    );
+    assert.equal(
+        await inPage<number>(
+            `return JSON.stringify(document.querySelectorAll("#entry-900001").length)`,
+        ),
+        1,
+    );
+});
+
+test("a late earlier-history response stays out of another conversation", real, async () => {
+    const other = await newSession(app);
+
+    await compactedView();
+    await page.evaluate(`
+        (await import("/store.js")).actions.history = () => new Promise(resolve => window.finishHistory = resolve);
+        [...document.querySelectorAll(".transcript button")]
+            .find(each => each.textContent === "Show earlier messages").click();
+    `);
+    await goTo(other);
+    await reach({ path: `/s/${other}` }, "the other conversation");
+    await page.evaluate(`
+        window.finishHistory(window.earlierEntries);
+        await new Promise(resolve => requestAnimationFrame(resolve));
+    `);
+    assert.equal(
+        await inPage<unknown>(
+            `return JSON.stringify((await import("/store.js")).store.state.history)`,
+        ),
+        null,
+    );
+});
+
 /** PiP closed and forgotten in this tab, so the tests after start without it. */
 async function noPip(): Promise<void> {
     await page.evaluate(`

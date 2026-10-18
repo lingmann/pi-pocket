@@ -254,3 +254,39 @@ test(
         );
     },
 );
+
+// Last too: it starts a session. Issue #96, reported by @poncardasm: New never used the folder you were in.
+test("New session here starts in the open session's folder", real, async () => {
+    const folder = join(work, "project-0");
+
+    await page.navigate(`${base}/s/${sessions[0]}`);
+    await see(
+        `const { store } = await import('/store.js');
+
+        return JSON.stringify(store.state.view.agent?.cwd === ${JSON.stringify(folder)} && !store.state.sheet);`,
+        "the session in project-0",
+    );
+    await settle();
+
+    // New itself opens the picker there, with no walking to the folder.
+    await page.press("Alt+n");
+    await see(
+        `return JSON.stringify(document.querySelector('.fp-target .mono')?.textContent === ${JSON.stringify(folder)})`,
+        "the New session picker at the session's folder",
+    );
+    await page.evaluate(`(await import('/store.js')).closeSheet()`);
+    await settle();
+
+    // And the launcher starts there, without the picker.
+    await open();
+    await search("> new session here");
+    await page.press("Enter");
+    await see(
+        `const { store } = await import('/store.js');
+
+        return JSON.stringify(store.state.view.agent?.cwd === ${JSON.stringify(folder)} &&
+            store.state.sessions.filter((session) => session.cwd === ${JSON.stringify(folder)}).length === 2 &&
+            !store.state.sheet);`,
+        "a session in the same folder, without the folder picker",
+    );
+});

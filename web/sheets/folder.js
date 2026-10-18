@@ -1,7 +1,8 @@
 // The folder picker, as a desktop's file dialog: places on the left (home, the computer, recent folders), the folders
 // where you are on the right, and Cancel and Open at the bottom. With a mouse, a click selects a folder and a double
 // click goes into it; on a touch screen, a tap goes into it. Open takes the selected folder, or the one you are in.
-// Favorites, each person's own and on all their devices, sit first among the places; Ctrl/⌘+1…9 starts in one.
+// It opens in the folder of the session you are in, so New session here is a tap away without walking the tree;
+// favorites, each person's own and on all their devices, sit first among the places; Ctrl/⌘+1…9 starts in one.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import {
     actions,
@@ -119,8 +120,8 @@ function LineInput({ value, placeholder, label, onSubmit, onCancel, class: class
 export function CwdSheet({ mode }) {
     const { view, server, folderFavorites: favorites } = store.state;
     const changing = mode === "change";
-    const initial =
-        (changing ? (view.agent?.cwd ?? server?.defaultCwd) : server?.defaultCwd) ?? "~";
+    // Where it opens: the folder of the session you are in (New session here), else the server's own. Issue #96.
+    const initial = view.agent?.cwd ?? server?.defaultCwd ?? "~";
     const [listing, setListing] = useState(null);
     const [failed, setFailed] = useState(null);
     // The folder a click selected (mouse only): Open takes it over the one you are in.
