@@ -726,7 +726,7 @@ export class Pip {
         const available = app.models.getAvailableSnapshot();
         const known = app.models.getModels();
         const written = indexed(text);
-        const named = modelsNamed(written, available, true, known);
+        const named = modelsNamed(written, available, true, known, false);
 
         if (named.length === 0) {
             return;

@@ -64,6 +64,7 @@ const faux = fauxProvider({
         { id: "faux-2" },
         { id: "faux-z8" },
         { id: "faux-vision", input: ["text", "image"] },
+        { id: "o3" },
     ],
 });
 
@@ -187,6 +188,18 @@ test("words that name a model not signed in name no shorter one that is", () => 
     assert.deepEqual(modelsNamed("use zeta-5", signedIn, true, known), [zeta]);
 });
 
+test("a model's name that touches Chinese, Japanese or Korean text names it", () => {
+    const sol = model("openai-codex", "gpt-6.1-sol", "GPT-6.1 Sol");
+    const opus = model("anthropic", "claude-opus-5", "Claude Opus 5");
+    const all = [sol, opus];
+
+    // Such a script writes no spaces between words: text glued to the name, before it or after it, still names it.
+    assert.equal(personNamed("以后默认模型都用gpt-6.1 sol吧", sol, all), true);
+    assert.equal(personNamed("新会话可以用opus5试试", opus, all), true);
+    // Its words name no model on their own: an ordinary sentence such as this one names none.
+    assert.deepEqual(modelsNamed("我的M3电脑跑不动", all, true), []);
+});
+
 test("PiP acts on a session only after it looked at it, and sees how it stands after", async () => {
     const id = await pip();
     const session = Number(await newSession(app));
@@ -260,6 +273,19 @@ test("PiP starts a session on a model only when its person named it, in their ow
         app.pip.start(id, { model: "faux/nothing" }),
         /not a model signed in here/,
     );
+});
+
+test("a two-character model id needs a qualifier, but PiP cannot pass it on unasked", async () => {
+    const id = await pip();
+
+    await say(app, id, "修复O3优化导致的错误");
+    await assert.rejects(app.pip.start(id, { model: "faux/o3" }), /did not name/);
+    await assert.rejects(app.pip.start(id, { message: "Use o3 to review it." }), /names faux\/o3/);
+
+    await say(app, id, "用o3 on faux吧");
+    const made = await app.pip.start(id, { model: "faux/o3" });
+
+    assert.equal((await app.agentState(made))?.model?.modelId, "o3");
 });
 
 test("PiP takes its person's bare answer to which provider pays, right after it asked, and nothing else", async () => {

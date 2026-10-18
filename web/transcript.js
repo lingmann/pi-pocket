@@ -1545,6 +1545,15 @@ function History({ firstId, results, keepPlace, conversationId }) {
                 onClick=${() =>
                     attempt(async () => {
                         const earlier = await actions.history(firstId);
+                        const current = store.state;
+
+                        // A response belongs to the conversation and context that asked for it, not the one now open.
+                        if (
+                            current.conversationId !== conversationId ||
+                            current.view.order[0] !== firstId
+                        ) {
+                            return;
+                        }
 
                         keepPlace();
                         store.set({ history: earlier });
@@ -1557,7 +1566,11 @@ function History({ firstId, results, keepPlace, conversationId }) {
 
     return html`<div class="history">
         <${Items}
-            items=${itemsOf(history.filter(isRow), null, { prefix: "h", talk: collab() })}
+            items=${itemsOf(
+                history.filter((entry) => isRow(entry) && !store.state.view.entries.has(entry.id)),
+                null,
+                { prefix: "h", talk: collab() },
+            )}
             results=${results}
             slots=${NO_SLOTS}
             approvals=${NO_APPROVALS}

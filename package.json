@@ -1,6 +1,6 @@
 {
     "name": "pi-pocket",
-    "version": "0.14.0",
+    "version": "0.15.0",
     "description": "A durable, multiplayer, mobile-first web app for Pi agents, built on Pi Durable",
     "private": true,
     "type": "module",
@@ -36,6 +36,7 @@
         "@earendil-works/pi-codemode": "1.1.0",
         "@earendil-works/pi-coding-agent": "1.1.0",
         "@earendil-works/pi-durable": "1.1.0",
+        "@earendil-works/pi-mcp": "1.1.0",
         "dompurify": "^3.4.16",
         "htm": "^3.1.1",
         "jiti": "2.7.0",
