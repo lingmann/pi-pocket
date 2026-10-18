@@ -221,7 +221,9 @@ What a browser shows is its person's choice of theme (`look`) and colors (`theme
 
 ### Browser-local Victor
 
-Victor runs recognition and speech in the foreground browser; recognized text uses the normal submission API with `source: "victor"`. Stopping Victor releases local audio but never aborts Pi's shared run. Missing or invalid prepared assets affect only Victor requests, not ordinary app startup.
+Victor runs recognition and speech in the foreground browser; the combined typed and recognized text uses the normal submission API with `source: "victor"`. The composer hands over an expanded plain-text draft; the controller keeps that starting text separate from recognition revisions and detects send commands only in new speech. Stopping Victor returns the complete unsent draft and releases local audio, but never aborts Pi's shared run.
+
+`victor-composer.js` owns the composer-side activation, draft handoff, and remount lifecycle through explicit callbacks; shared storage, paste formats, and UI updates stay in `composer.js`. The adapter clears only its handed-off draft before a POST starts and restores definite rejections to the originating conversation without erasing newer typing. Unresolved delivery blocks Victor reactivation across the tab but ordinary Send only in that conversation. Uncertain delivery never automatically restores a sendable copy. Missing or invalid prepared assets affect only Victor requests, not ordinary app startup.
 
 `Commands.submit` validates the source and calls `recordInputSource` (`victor-replies.ts`) before admitting the input. This stores a write-once `InputSourceDoc` family member keyed by the canonical request ID, for text inputs too. Pi Durable's submission API has no metadata field, so this is a separate preceding commit: an interruption can leave an unused source record, but generation cannot start before the source exists. Retries keep its first value; an already-admitted legacy input without a record remains text. Forks start with empty source records.
 

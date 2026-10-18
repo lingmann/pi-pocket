@@ -2,7 +2,7 @@
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { waitForWorkerControl } from "./service-worker.js";
-import { api, drafts, notify, store, uid } from "./store.js";
+import { api, notify, store, uid } from "./store.js";
 import { replyText } from "./ui.js";
 import { setDictationBlocked } from "./voice.js";
 
@@ -28,15 +28,30 @@ let flushing = false;
 let queuedSamples = 0;
 let sampleRate = 0;
 let pending = null;
+// Unlike audio ownership, an unresolved POST survives turning Victor off.
+let delivery = null;
+let startingText = "";
+let recognizedText = "";
 let lastReply = null;
 let unsent = false;
 let unsubscribe = null;
 const timers = new Map();
 
 export const victorMode = {
-    state: { phase: "off", text: "", message: "", hasReply: false, speed: savedSpeed() },
+    state: {
+        phase: "off",
+        text: "",
+        message: "",
+        hasReply: false,
+        speed: savedSpeed(),
+        deliveryPending: false,
+    },
     get active() {
         return this.state.phase !== "off";
+    },
+    // Audio activation is tab-wide; a pending POST protects only its originating draft.
+    blocksSend(conversationId) {
+        return delivery !== null && delivery.id === conversationId;
     },
     subscribe(listener) {
         listeners.add(listener);
@@ -75,7 +90,12 @@ function savedSpeed() {
 }
 
 function update(patch) {
-    victorMode.state = { ...victorMode.state, ...patch, hasReply: lastReply !== null };
+    victorMode.state = {
+        ...victorMode.state,
+        ...patch,
+        hasReply: lastReply !== null,
+        deliveryPending: delivery !== null,
+    };
 
     for (const listener of listeners) {
         listener(victorMode.state);
@@ -118,6 +138,10 @@ function unavailable(id, idle = true) {
         return "Pick a model before turning Victor on.";
     }
 
+    if (idle && delivery) {
+        return "Wait until your Victor message is sent before turning Victor on.";
+    }
+
     if (idle && (view.live.busy || view.inbox.length > 0)) {
         return "Wait for Pi and the message queue to finish first.";
     }
@@ -125,15 +149,38 @@ function unavailable(id, idle = true) {
     return null;
 }
 
-function enable({ conversationId, preserveDraft }) {
+function textUnavailable(text, validateText) {
+    return /^[!/]/.test(text.trimStart())
+        ? "Victor sends ordinary text only. Send or clear commands before turning Victor on."
+        : (validateText?.(text) ?? null);
+}
+
+/** Recognition may revise its whole transcript, but never the text handed over by the composer. */
+function combinedText() {
+    const separator = startingText && recognizedText && !/\s$/.test(startingText) ? " " : "";
+
+    return startingText + separator + recognizedText;
+}
+
+/**
+ * Draft handoff from the composer adapter:
+ * - initialText is expanded plain text, kept separate from revisable recognition.
+ * - validateText runs synchronously on activation and on the final combined text.
+ * - consumeDraft synchronously clears the handed-off copy before each POST; throwing prevents it.
+ * - preserveDraft receives expanded, untrimmed text on stop or definite late rejection. It may run
+ *   after the originating composer unmounts and must retain newer typing in that conversation.
+ * Uncertain delivery never invokes preservation for the submitted text. An unresolved POST blocks
+ * all reactivation, but blocks ordinary Send only in its own conversation (blocksSend).
+ */
+function enable({ conversationId, initialText = "", preserveDraft, consumeDraft, validateText }) {
     if (victorMode.active) {
         return;
     }
 
-    const reason = unavailable(conversationId);
+    const reason = unavailable(conversationId) ?? textUnavailable(initialText, validateText);
 
-    if (reason || drafts.get(conversationId).trim()) {
-        notify("warning", reason ?? "Send or clear your draft before turning Victor on.");
+    if (reason) {
+        notify("warning", reason);
 
         return;
     }
@@ -157,14 +204,19 @@ function enable({ conversationId, preserveDraft }) {
     owner = {
         id: conversationId,
         preserveDraft,
+        consumeDraft,
+        validateText,
         boundary: store.state.view.order.at(-1) ?? null,
         streamId: store.state.streamId,
         permission: permissionKey(),
     };
+    startingText = initialText;
+    recognizedText = "";
+    unsent = true;
     setDictationBlocked(true);
     update({
         phase: "preparing",
-        text: "",
+        text: initialText,
         message: "Loading local recognition and speech…",
     });
     unsubscribe = store.subscribe(reconcile);
@@ -334,12 +386,14 @@ function release() {
 }
 
 function disable() {
-    const draft = unsent ? victorMode.state.text.trim() : "";
+    const draft = unsent ? victorMode.state.text : "";
     const preserve = owner?.preserveDraft;
 
     release();
     owner = null;
     unsent = false;
+    startingText = "";
+    recognizedText = "";
     setDictationBlocked(false);
     update({ phase: "off", text: "", message: "" });
 
@@ -542,7 +596,8 @@ function hear(data) {
             break;
         case "partial":
             if (unsent) {
-                update({ text: data.text });
+                recognizedText = data.text;
+                update({ text: combinedText() });
                 submitCommand();
             }
 
@@ -558,7 +613,7 @@ function hear(data) {
 }
 
 function submitCommand() {
-    if (victorMode.state.phase === "listening" && capture && SEND.test(victorMode.state.text)) {
+    if (victorMode.state.phase === "listening" && capture && SEND.test(recognizedText)) {
         update({ phase: "submitting", message: "Finishing recognition…" });
         flushing = true;
         timer("finish", 15000, () => fail("Recognition did not finish. Your draft has been kept."));
@@ -566,35 +621,50 @@ function submitCommand() {
     }
 }
 
-async function submitFinal(text) {
-    if (!SEND.test(text)) {
-        update({ text });
+async function submitFinal(transcript) {
+    if (!SEND.test(transcript)) {
+        recognizedText = transcript;
+        update({ text: combinedText() });
         fail("The final transcript did not end with “send it”. Your draft has been kept.");
 
         return;
     }
 
-    text = text.replace(SEND, "").trim();
-    update({ text });
+    recognizedText = transcript.replace(SEND, "").trim();
+    const draft = combinedText();
+    const text = draft.trim();
+
+    update({ text: draft });
 
     if (!text) {
-        unsent = false;
+        recognizedText = "";
         listen();
 
         return;
     }
 
-    const reason = unavailable(owner.id);
+    const reason = unavailable(owner.id) ?? textUnavailable(text, owner.validateText);
 
-    if (reason || /^[!/]/.test(text)) {
-        fail(reason ?? "Victor sends ordinary text only. Your draft has been kept.");
+    if (reason) {
+        fail(reason);
+
+        return;
+    }
+
+    try {
+        // Clear only the handed-off composer draft, before delivery can become uncertain.
+        owner.consumeDraft?.();
+    } catch (error) {
+        fail(`The draft could not be handed over: ${error.message}. Nothing was sent.`);
 
         return;
     }
 
     const token = epoch;
+    const preserve = owner.preserveDraft;
     const attempt = { id: owner.id, requestId: uid(), text, accepted: false, spoken: false };
 
+    delivery = attempt;
     pending = attempt;
     lastReply = null;
     // Once the POST starts, delivery may be uncertain. Never restore an automatic duplicate draft.
@@ -611,25 +681,50 @@ async function submitFinal(text) {
             inlineFiles: false,
         });
 
+        delivery = null;
+
         if (token !== epoch) {
+            update({});
+
             return;
         }
 
+        startingText = "";
+        recognizedText = "";
         attempt.accepted = true;
         update({ phase: "waiting", text: "", message: "Waiting for Pi’s completed reply…" });
         timer("reply", 30000, checkReply);
         reconcile();
     } catch (error) {
+        delivery = null;
+        const rejected = error.status >= 400 && error.status < 500;
+        const message = rejected
+            ? `Pi did not accept the message: ${error.message}`
+            : "Delivery is uncertain. Check the conversation before sending this text again.";
+
         if (token !== epoch) {
+            // Navigation or audio failure may have released the controller while the POST ran.
+            // Restore only definite rejections, using the captured conversation's draft handoff.
+            let restorationError = "";
+
+            try {
+                if (rejected) {
+                    preserve?.(draft);
+                }
+            } catch (error) {
+                restorationError = ` The draft could not be restored: ${error.message}`;
+            } finally {
+                // A full or unavailable browser store must not leave ordinary Send blocked.
+                update({});
+            }
+
+            notify("warning", message + restorationError);
+
             return;
         }
 
-        unsent = error.status >= 400 && error.status < 500;
-        fail(
-            unsent
-                ? `Pi did not accept the message: ${error.message}`
-                : "Delivery is uncertain. Check the conversation before sending this text again.",
-        );
+        unsent = rejected;
+        fail(message);
     }
 }
 

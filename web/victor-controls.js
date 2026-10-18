@@ -27,7 +27,7 @@ const VICTOR_STATUS = {
     error: "Victor stopped",
 };
 
-/** A separate draft keeps recognized words out of typed messages and their attachments. */
+/** Show the starting text and current speech together while Victor owns draft editing. */
 export function VictorControls({ state, toggle }) {
     if (state.phase === "off") {
         return null;
