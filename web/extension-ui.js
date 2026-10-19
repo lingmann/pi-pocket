@@ -370,7 +370,7 @@ function sync(list) {
         notify(
             "warning",
             "Extensions' browser parts are off in this tab, and so is the theme. Menu → Extensions turns them back on.",
-            () => openSheet({ type: "extensions" }),
+            () => openSheet({ type: "extensions", tab: "installed" }),
         );
     }
 

@@ -137,7 +137,13 @@ function GalleryPart({ module, installed, busy, turnOff }) {
         ${installed.update && html`<span class="pi-tag behind">update available</span>`}
         <button
             class="link small"
-            onClick=${() => openSheet({ type: "gallery-entry", id: installed.name })}
+            onClick=${() =>
+                openSheet({
+                    type: "gallery-entry",
+                    id: installed.name,
+                    tab: "installed",
+                    origin: store.state.sheet?.origin ?? "extensions",
+                })}
         >
             Details
         </button>
@@ -179,6 +185,13 @@ function PipCompactAt({ owner }) {
 }
 
 export function ExtensionsSheet() {
+    return html`<${Sheet} title="Extensions" onClose=${closeSheet} wide=${true}>
+        <${ExtensionsContent} />
+    <//>`;
+}
+
+/** The same management controls standalone or in the hub's Installed tab. */
+export function ExtensionsContent({ galleryInstalled, query = "", onChanged = () => {} }) {
     const { me } = store.state;
     const owner = me?.role === "owner";
     const [data, setData] = useState(null);
@@ -196,6 +209,7 @@ export function ExtensionsSheet() {
                 setProblem(null);
 
                 if (
+                    galleryInstalled === undefined &&
                     galleryAvailable() &&
                     result.modules.some((each) => each.source === "drop-in")
                 ) {
@@ -216,7 +230,7 @@ export function ExtensionsSheet() {
 
     useEffect(() => {
         load();
-    }, []);
+    }, [galleryInstalled]);
     useLayoutEffect(() => {
         if (confirmGuard) {
             guardCancel.current?.focus();
@@ -234,6 +248,7 @@ export function ExtensionsSheet() {
         ).finally(() => {
             setBusy(null);
             load();
+            onChanged();
         });
     };
 
@@ -260,7 +275,28 @@ export function ExtensionsSheet() {
         change(module, "", { enabled: !module.enabled });
     };
 
-    return html`<${Sheet} title="Extensions" onClose=${closeSheet} wide=${true}>
+    const installedByFile =
+        galleryInstalled === undefined
+            ? fromGallery
+            : new Map(galleryInstalled.map((item) => [item.file, item]));
+    const needle = query.trim().toLowerCase();
+    const managed = (data?.modules ?? []).filter(
+        (module) =>
+            (galleryInstalled === undefined ||
+                !installedByFile.has(module.file) ||
+                // Keep failed gallery modules here too: their loader/browser errors are management data.
+                module.error ||
+                browserModuleState(module.file.replace(/\.ts$/, ""))?.status === "failed") &&
+            (!needle ||
+                [
+                    module.title,
+                    module.file,
+                    module.summary ?? "",
+                    ...module.extensions.flatMap((extension) => extension.tools),
+                ].some((text) => text.toLowerCase().includes(needle))),
+    );
+
+    return html`<div class="extension-management">
         <p class="muted small">
             Extensions give Pi its tools and checks in Pi Pocket, and can add pages and buttons to the app. A change applies to every session right away and stays after restarts.${owner ? "" : " Only the owner can change them."}
         </p>
@@ -269,6 +305,7 @@ export function ExtensionsSheet() {
             owner &&
             html`<div class="sheet-list">
                 ${
+                    galleryInstalled === undefined &&
                     galleryAvailable() &&
                     html`<button class="list-item" onClick=${() => openSheet({ type: "gallery" })}>
                         <span><${Icon} name="search" size=${16} /> Find extensions</span>
@@ -286,8 +323,8 @@ export function ExtensionsSheet() {
         ${
             data &&
             [
-                ["Built in", data.modules.filter((module) => module.source !== "drop-in")],
-                ["Yours", data.modules.filter((module) => module.source === "drop-in")],
+                ["Built in", managed.filter((module) => module.source !== "drop-in")],
+                ["Yours", managed.filter((module) => module.source === "drop-in")],
             ]
                 .filter(([, modules]) => modules.length > 0)
                 .map(
@@ -371,7 +408,7 @@ export function ExtensionsSheet() {
                                         <${WebPart} module=${module} />
                                         <${GalleryPart}
                                             module=${module}
-                                            installed=${fromGallery.get(module.file)}
+                                            installed=${installedByFile.get(module.file)}
                                             busy=${busy !== null}
                                             turnOff=${() => change(module, "", { enabled: false })}
                                         />
@@ -412,5 +449,5 @@ export function ExtensionsSheet() {
                 Add your own: put a <span class="mono">.ts</span> extension module in <span class="mono">${shortPath(data.dropIns, store.state.server?.home)}</span>. Drop-ins stay off until the owner turns them on, and run inside the server with the owner's rights.
             </p>`
         }
-    <//>`;
+    </div>`;
 }

@@ -100,7 +100,19 @@ const Out = ({ href, class: className = "", children }) =>
 /** The last index read, so an entry opened from the list shows at once while it is read again. */
 let lastListing = null;
 
-function useListing() {
+/** Preserve the hub tab through source/update sheets and their return to an entry. */
+function openGallerySheet(type, name) {
+    const sheet = store.state.sheet;
+
+    openSheet({
+        type,
+        id: name,
+        tab: sheet?.tab,
+        origin: sheet?.origin ?? (sheet?.type === "gallery" ? "gallery" : "extensions"),
+    });
+}
+
+function useListing(shared) {
     const [data, setData] = useState(lastListing);
     const [problem, setProblem] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -125,14 +137,18 @@ function useListing() {
     };
 
     useEffect(() => {
-        load();
+        live.current = true;
+
+        if (!shared) {
+            load();
+        }
 
         return () => {
             live.current = false;
         };
     }, []);
 
-    return { data, problem, loading, load };
+    return shared ?? { data, problem, loading, load };
 }
 
 /** How an installed extension stands, as small pills. */
@@ -148,26 +164,65 @@ function StatePills({ installed }) {
     </span>`;
 }
 
-function EntryRow({ entry }) {
-    return html`<button
-        class="gallery-row"
-        onClick=${() => openSheet({ type: "gallery-entry", id: entry.name })}
-    >
-        <span class="gallery-row-text">
-            <span class="gallery-row-head">
-                <span class="gallery-row-title">${entry.title}</span>
-                <span class="gallery-row-name mono">${entry.name}</span>
-                ${isTheme(entry) && html`<span class="pi-tag gallery-plain">Theme</span>`}
+function EntryRow({ entry, selected, onOpen, onChanged, updates }) {
+    const [busy, setBusy] = useState(false);
+    const going = useRef(false);
+    const installed = entry.installed ?? (entry.listed === false ? entry : null);
+
+    const install = () => {
+        if (going.current) {
+            return;
+        }
+
+        going.current = true;
+        setBusy(true);
+        attempt(() =>
+            galleryApi(`install/${encodeURIComponent(entry.name)}`, { pin: entry.pin }),
+        ).finally(() => {
+            going.current = false;
+            setBusy(false);
+            onChanged();
+        });
+    };
+
+    return html`<div class=${`gallery-card ${selected ? "selected" : ""}`}>
+        <button
+            class="gallery-card-open"
+            aria-current=${selected ? "true" : undefined}
+            onClick=${onOpen}
+        >
+            <span class="gallery-row-text">
+                <span class="gallery-row-head">
+                    <span class="gallery-row-title">${entry.title}</span>
+                    <span class="gallery-row-name mono">${entry.name}</span>
+                    ${isTheme(entry) && html`<span class="pi-tag gallery-plain">Theme</span>`}
+                </span>
+                ${entry.description && html`<span class="gallery-row-desc">${entry.description}</span>`}
+                <span class="gallery-row-meta">
+                    ${(entry.tags ?? []).map((tag) => html`<span class="gallery-tag-text" key=${tag}>#${tag}</span>`)}
+                    <span>${entry.author ? `${entry.author.name} · ` : ""}v${entry.version}${entry.unlisted ? ` · ${entry.unlisted}` : ""}</span>
+                </span>
+                <${StatePills} installed=${installed} />
             </span>
-            ${entry.description && html`<span class="gallery-row-desc">${entry.description}</span>`}
-            <span class="gallery-row-meta">
-                ${entry.tags.map((tag) => html`<span class="gallery-tag-text" key=${tag}>#${tag}</span>`)}
-                <span>${entry.author.name} · v${entry.version}</span>
-            </span>
-            <${StatePills} installed=${entry.installed} />
-        </span>
-        <${Icon} name="chevron" size=${14} />
-    </button>`;
+        </button>
+        <div class="gallery-card-actions">
+            ${
+                !installed &&
+                html`<button class="button small primary" disabled=${busy} onClick=${install}>
+                    ${busy ? "Installing…" : isTheme(entry) ? "Install theme" : "Install (stays off)"}
+                </button>`
+            }
+            ${
+                installed?.update &&
+                html`<button
+                    class=${`button small ${updates ? "primary" : ""}`}
+                    onClick=${() => openGallerySheet("gallery-update", entry.name)}
+                >
+                    Review update
+                </button>`
+            }
+        </div>
+    </div>`;
 }
 
 /** The most common tags first, at most `limit`. */
@@ -272,170 +327,229 @@ function IndexAddress({ address, onChanged }) {
     </form>`;
 }
 
-/** Browse: search, tag pills, and the entries for this Pi Pocket. */
-export function GallerySheet() {
-    const { data, problem, loading, load } = useListing();
+/** One hub, whether opened from Extensions or Appearance's gallery link. */
+export function GallerySheet({
+    selected = null,
+    tab = "discover",
+    origin = "extensions",
+    Management,
+}) {
+    const listing = useListing();
+    const { data, problem, loading, load } = listing;
     const [query, setQuery] = useState("");
     const [tag, setTag] = useState(null);
-    // "theme", "extension", or null for both.
     const [kind, setKind] = useState(null);
-    const [showInvalid, setShowInvalid] = useState(false);
     const needle = query.trim().toLowerCase();
-    // A version the index revoked is not offered, unless it is the one installed here.
+    const installed = data?.installed ?? [];
+    // Revoked offered versions stay hidden unless one is already installed here.
     const offered = (data?.entries ?? []).filter(
         (entry) => entry.installed !== null || revocation(entry, entry.source.commit) === undefined,
     );
+    const entries =
+        tab === "discover"
+            ? offered
+            : [
+                  ...offered.filter(
+                      (entry) => entry.installed && (tab !== "updates" || entry.installed.update),
+                  ),
+                  ...installed.filter((item) => !item.listed && (tab !== "updates" || item.update)),
+              ];
     const tags = topTags(offered, 10);
-    // The kinds as a filter, while the index offers both.
     const kinds = offered.some(isTheme) && !offered.every(isTheme) ? ["extension", "theme"] : [];
-    const matches = offered.filter(
+    const matches = entries.filter(
         (entry) =>
             (kind === null || (kind === "theme") === isTheme(entry)) &&
-            (tag === null || entry.tags.includes(tag)) &&
+            (tag === null || entry.tags?.includes(tag)) &&
             (needle === "" ||
-                [entry.name, entry.title, entry.description, ...entry.tags].some((text) =>
-                    text.toLowerCase().includes(needle),
+                [entry.name, entry.title, entry.description ?? "", ...(entry.tags ?? [])].some(
+                    (text) => text.toLowerCase().includes(needle),
                 )),
     );
-    const elsewhere = (data?.installed ?? []).filter((each) => !each.listed);
+    const detailName = selected ?? (tab === "discover" ? matches[0]?.name : null);
     const hidden = data?.hidden ?? { incompatible: 0, invalid: [] };
+    const select = (name) => openSheet({ type: "gallery-entry", id: name, tab, origin });
 
-    return html`<${Sheet} title="Find extensions" onClose=${closeSheet} wide=${true} className="gallery">
-        <p class="muted small">
-            Drop-ins and themes other people wrote, from a reviewed index. Drop-ins install turned off: read their code, or ask Pi to review it, before you turn one on. A theme installs into the list in Appearance, where each person can choose it.
-        </p>
-        ${problem && html`<div class="error-box small">${problem}</div>`}
-        ${data?.error && html`<div class="error-box small">${data.error}</div>`}
-        ${!data && !problem && html`<${Loader} label="Reading the index" />`}
-        ${
-            data &&
-            offered.length > 0 &&
-            html`<input
+    const changeTab = (next) => {
+        setQuery("");
+        setTag(null);
+        setKind(null);
+        openSheet({ type: origin, tab: next });
+    };
+
+    return html`<${Sheet}
+        title="Extensions"
+        onClose=${closeSheet}
+        wide=${true}
+        className="extension-hub gallery"
+    >
+        <div class="extension-hub-tabs" role="tablist" aria-label="Extensions">
+            ${[
+                ["discover", "Discover"],
+                ["installed", "Installed"],
+                ["updates", "Updates"],
+            ].map(
+                ([value, label]) => html`<button
+                    key=${value}
+                    class=${`extension-hub-tab ${tab === value ? "on" : ""}`}
+                    role="tab"
+                    aria-selected=${tab === value}
+                    onClick=${() => changeTab(value)}
+                >
+                    ${label}${
+                        value === "updates" && installed.filter((item) => item.update).length > 0
+                            ? ` (${installed.filter((item) => item.update).length})`
+                            : ""
+                    }
+                </button>`,
+            )}
+        </div>
+        <div class="extension-hub-toolbar">
+            <input
                 class="find-input"
                 type="search"
-                autofocus
-                placeholder=${offered.some(isTheme) ? "Search extensions and themes" : "Search extensions"}
-                aria-label="Search the gallery: names, descriptions, and tags"
+                placeholder="Search extensions and themes"
+                aria-label="Search extensions and themes"
                 value=${query}
                 onInput=${(event) => setQuery(event.currentTarget.value)}
-            />`
-        }
-        ${
-            (tags.length > 1 || kinds.length > 0) &&
-            html`<div class="gallery-tags" role="group" aria-label="Kinds and tags">
-                ${kinds.map(
-                    (each) => html`<button
-                        key=${`kind-${each}`}
-                        class=${`gallery-tag ${kind === each ? "on" : ""}`}
-                        aria-pressed=${kind === each}
-                        onClick=${() => setKind(kind === each ? null : each)}
-                    >
-                        ${each === "theme" ? "Themes" : "Extensions"}
-                    </button>`,
-                )}
-                ${(tags.length > 1 ? tags : []).map(
-                    (each) => html`<button
-                        key=${each}
-                        class=${`gallery-tag ${tag === each ? "on" : ""}`}
-                        aria-pressed=${tag === each}
-                        onClick=${() => setTag(tag === each ? null : each)}
-                    >
-                        ${each}
-                    </button>`,
-                )}
-            </div>`
-        }
-        ${
-            data &&
-            offered.length === 0 &&
-            !data.error &&
-            html`<p class="muted">The index has nothing for this Pi Pocket yet.</p>`
-        }
-        ${
-            matches.length > 0 &&
-            html`<div class="sheet-list gallery-list">
-                ${matches.map((entry) => html`<${EntryRow} key=${entry.name} entry=${entry} />`)}
-            </div>`
-        }
-        ${
-            offered.length > 0 &&
-            matches.length === 0 &&
-            html`<p class="muted">
-                Nothing matches${needle ? ` “${query.trim()}”` : ""}${kind ? ` in ${kind === "theme" ? "themes" : "extensions"}` : ""}${tag ? ` with the tag ${tag}` : ""}.
-            </p>`
-        }
-        ${
-            elsewhere.length > 0 &&
-            html`<div class="group">
-                <div class="group-title">Installed, not listed now</div>
-                <div class="sheet-list gallery-list">
-                    ${elsewhere.map(
+            />
+            <button class="button small" disabled=${loading} onClick=${() => load(true)}>
+                <${Icon} name="reload" size=${14} /> Refresh
+            </button>
+            ${
+                (tags.length > 1 || kinds.length > 0) &&
+                html`<div class="gallery-tags" role="group" aria-label="Kinds and tags">
+                    ${kinds.map(
                         (each) => html`<button
-                            key=${each.name}
-                            class="gallery-row"
-                            onClick=${() => openSheet({ type: "gallery-entry", id: each.name })}
+                            key=${`kind-${each}`}
+                            class=${`gallery-tag ${kind === each ? "on" : ""}`}
+                            aria-pressed=${kind === each}
+                            onClick=${() => setKind(kind === each ? null : each)}
                         >
-                            <span class="gallery-row-text">
-                                <span class="gallery-row-head">
-                                    <span class="gallery-row-title">${each.title}</span>
-                                    <span class="gallery-row-name mono">${each.name}</span>
-                                </span>
-                                <span class="gallery-row-meta">v${each.version} · ${each.unlisted}</span>
-                                <${StatePills} installed=${each} />
-                            </span>
-                            <${Icon} name="chevron" size=${14} />
+                            ${each === "theme" ? "Themes" : "Extensions"}
                         </button>`,
                     )}
-                </div>
-            </div>`
-        }
-        ${
-            data &&
-            (hidden.incompatible > 0 || hidden.invalid.length > 0) &&
-            html`<div class="muted small gallery-hidden">
-                ${hidden.incompatible > 0 && html`<span>${plural(hidden.incompatible, "entry")} ${hidden.incompatible === 1 ? "needs" : "need"} a newer Pi Pocket.</span>`}
+                    ${(tags.length > 1 ? tags : []).map(
+                        (each) => html`<button
+                            key=${each}
+                            class=${`gallery-tag ${tag === each ? "on" : ""}`}
+                            aria-pressed=${tag === each}
+                            onClick=${() => setTag(tag === each ? null : each)}
+                        >
+                            ${each}
+                        </button>`,
+                    )}
+                </div>`
+            }
+        </div>
+        <div class=${`extension-hub-layout ${tab} ${selected ? "has-selection" : ""}`}>
+            <div class="extension-hub-list">
+                ${problem && html`<div class="error-box small">${problem}</div>`}
+                ${data?.error && html`<div class="error-box small">${data.error}</div>`}
+                ${!data && !problem && html`<${Loader} label="Reading the index" />`}
                 ${
-                    hidden.invalid.length > 0 &&
-                    html`<button class="link small" onClick=${() => setShowInvalid(!showInvalid)}>
-                        ${plural(hidden.invalid.length, "entry")} could not be read
-                    </button>`
+                    tab === "discover" &&
+                    html`<p class="muted small">
+                        Extensions and themes from a reviewed index. Extensions install turned off; read their source or ask Pi to review them before turning them on.
+                    </p>`
                 }
-            </div>`
-        }
-        ${
-            showInvalid &&
-            html`<ul class="gallery-problems small">
-                ${hidden.invalid.map(
-                    (each, index) => html`<li key=${index}>
-                        ${each.name && html`<span class="mono">${each.name}</span>`}
-                        ${each.name ? ": " : ""}${each.problem}
-                    </li>`,
-                )}
-            </ul>`
-        }
-        ${
-            data &&
-            html`<div class="group">
-                <div class="group-title">Where they come from</div>
-                <div class="sheet-list gallery-panel">
-                    <${IndexAddress} address=${data.address} onChanged=${() => load(true)} />
-                    <div class="setting wrap">
-                        <div class="grow muted small">
-                            ${loading ? "Reading the index…" : data.fetchedAt ? `Read ${timeAgo(data.fetchedAt)}` : "Not read yet"}
-                        </div>
-                        <button class="button small" disabled=${loading} onClick=${() => load(true)}>
-                            <${Icon} name="reload" size=${14} /> Refresh
-                        </button>
+                ${
+                    matches.length > 0 &&
+                    html`<div class="gallery-list">
+                        ${matches.map(
+                            (entry) => html`<${EntryRow}
+                                key=${entry.name}
+                                entry=${entry}
+                                selected=${detailName === entry.name}
+                                onOpen=${() => select(entry.name)}
+                                onChanged=${load}
+                                updates=${tab === "updates"}
+                            />`,
+                        )}
+                    </div>`
+                }
+                ${
+                    data &&
+                    matches.length === 0 &&
+                    html`<p class="extension-hub-empty muted">
+                        ${
+                            needle || tag || kind
+                                ? tab === "installed"
+                                    ? "No gallery extensions or themes match these filters."
+                                    : "Nothing matches these filters."
+                                : tab === "updates"
+                                  ? "Everything is up to date."
+                                  : tab === "installed"
+                                    ? "No gallery extensions or themes installed yet."
+                                    : "The index has nothing for this Pi Pocket yet."
+                        }
+                    </p>`
+                }
+                ${
+                    tab === "installed" &&
+                    kind !== "theme" &&
+                    tag === null &&
+                    Management &&
+                    html`<${Management}
+                        galleryInstalled=${installed}
+                        query=${query}
+                        onChanged=${load}
+                    />`
+                }
+                ${
+                    tab === "discover" &&
+                    data &&
+                    html`<details class="gallery-technical">
+                        <summary>Index settings and status</summary>
+                        <${IndexAddress} address=${data.address} onChanged=${() => load(true)} />
+                        <p class="muted small">
+                            ${data.fetchedAt ? `Read ${timeAgo(data.fetchedAt)}` : "Not read yet"}
+                        </p>
+                        ${
+                            hidden.incompatible > 0 &&
+                            html`<p class="muted small">
+                                ${plural(hidden.incompatible, "entry")} need a newer Pi Pocket.
+                            </p>`
+                        }
+                        ${
+                            hidden.invalid.length > 0 &&
+                            html`<ul class="gallery-problems small">
+                                ${hidden.invalid.map(
+                                    (each, index) => html`<li key=${index}>
+                                        ${each.name ? `${each.name}: ` : ""}${each.problem}
+                                    </li>`,
+                                )}
+                            </ul>`
+                        }
                         ${
                             data.repoUrl &&
                             html`<${Out} class="button small" href=${data.repoUrl}>
                                 Submit yours <${Icon} name="external" size=${14} />
                             <//>`
                         }
-                    </div>
-                </div>
-            </div>`
-        }
+                    </details>`
+                }
+            </div>
+            <div class="extension-hub-detail">
+                ${
+                    detailName
+                        ? html`
+                            <button
+                                class="button small extension-hub-detail-back"
+                                onClick=${() => openSheet({ type: origin, tab })}
+                            >
+                                <${Icon} name="back" size=${16} /> Back to ${tab === "discover" ? "Discover" : tab === "installed" ? "Installed" : "Updates"}
+                            </button>
+                            <${GalleryEntrySheet}
+                                key=${detailName}
+                                name=${detailName}
+                                listing=${listing}
+                                embedded=${true}
+                            />
+                        `
+                        : html`<div class="extension-hub-empty muted">Choose an extension or theme to see its details.</div>`
+                }
+            </div>
+        </div>
     <//>`;
 }
 
@@ -518,9 +632,23 @@ async function setEnabled(installed, title, enabled) {
     return true;
 }
 
+/** Embedded detail is content, not a second dialog inside the hub. */
+function EntryFrame({ embedded, title, children }) {
+    return embedded
+        ? html`<div class="gallery-entry-content">${children}</div>`
+        : html`<${Sheet}
+              title=${title}
+              onClose=${closeSheet}
+              wide=${true}
+              className="gallery extension-detail-sheet"
+          >
+              ${children}
+          <//>`;
+}
+
 /** One entry: what it is, where it comes from, what it declares, and what the owner can do with it here. */
-export function GalleryEntrySheet({ name }) {
-    const { data, problem, load } = useListing();
+export function GalleryEntrySheet({ name, listing, embedded = false }) {
+    const { data, problem, load } = useListing(listing);
     const [busy, setBusy] = useState(false);
     // Set at once, not at the next render: a second tap in the same moment must not run it twice.
     const going = useRef(false);
@@ -546,7 +674,7 @@ export function GalleryEntrySheet({ name }) {
     };
 
     if (!entry && !installed) {
-        return html`<${Sheet} title="Extension" onClose=${closeSheet}>
+        return html`<${EntryFrame} title="Extension" embedded=${embedded}>
             ${problem && html`<div class="error-box small">${problem}</div>`}
             ${
                 data === null
@@ -564,6 +692,7 @@ export function GalleryEntrySheet({ name }) {
             problem=${problem}
             busy=${busy}
             run=${run}
+            embedded=${embedded}
         />`;
     }
 
@@ -592,7 +721,7 @@ export function GalleryEntrySheet({ name }) {
 
     const review = () => run(() => askForReview(name), false);
 
-    return html`<${Sheet} title=${title} onClose=${closeSheet} className="gallery">
+    return html`<${EntryFrame} title=${title} embedded=${embedded}>
         ${problem && html`<div class="error-box small">${problem}</div>`}
         ${
             installed &&
@@ -628,35 +757,6 @@ export function GalleryEntrySheet({ name }) {
                 ${entry.tags.map((tag) => html`<span class="gallery-tag-text" key=${tag}>#${tag}</span>`)}
             </div>`
         }
-        <${EntryFacts}
-            entry=${entry}
-            installed=${installed}
-            needs=${entry && `Pi Pocket ${entry.minPocket} or newer · extension API ${entry.pocketApi}`}
-        />
-        ${
-            installed?.changed.length > 0 &&
-            html`<div class="gallery-warn small">
-                Not as installed (edited since, or gone): <span class="mono">${installed.changed.join(", ")}</span>
-            </div>`
-        }
-        ${
-            files &&
-            html`<div class="group">
-                <div class="group-title">Files</div>
-                <div class="sheet-list gallery-files">
-                    ${files.map(
-                        (file) => html`<div class="gallery-file" key=${file.name}>
-                            <span class="mono">${file.name}</span>
-                            <span class="muted small">${formatBytes(file.size)}</span>
-                        </div>`,
-                    )}
-                </div>
-            </div>`
-        }
-        <div class="group">
-            <div class="group-title">What it declares</div>
-            <${Declares} declares=${declares} />
-        </div>
         <p class="gallery-warn small">${RISK} Read its code before you turn it on.</p>
         <div class="gallery-actions">
             ${
@@ -683,7 +783,7 @@ export function GalleryEntrySheet({ name }) {
                 html`<button
                     class="button primary"
                     disabled=${busy}
-                    onClick=${() => openSheet({ type: "gallery-update", id: name })}
+                    onClick=${() => openGallerySheet("gallery-update", name)}
                 >
                     Update to ${installed.update.version}
                 </button>`
@@ -691,7 +791,7 @@ export function GalleryEntrySheet({ name }) {
             <button
                 class="button"
                 disabled=${busy}
-                onClick=${() => openSheet({ type: "gallery-source", id: name })}
+                onClick=${() => openGallerySheet("gallery-source", name)}
             >
                 View source
             </button>
@@ -705,13 +805,58 @@ export function GalleryEntrySheet({ name }) {
                 installed &&
                 installed.enabled &&
                 installed.revoked === null &&
-                html`<button class="button" disabled=${busy} onClick=${() => toggle(false)}>Turn off</button>`
+                html`<button
+                    class="button"
+                    disabled=${busy}
+                    onClick=${() => toggle(false)}
+                >
+                    Turn off
+                </button>
+                <button
+                    class="button"
+                    disabled=${busy}
+                    onClick=${() => run(() => api(`extensions/${encodeURIComponent(installed.file)}/reload`, {}))}
+                >
+                    Reload
+                </button>`
             }
             ${
                 installed &&
                 html`<button class="button ghost" disabled=${busy} onClick=${uninstall}>Uninstall</button>`
             }
         </div>
+        ${
+            installed?.changed.length > 0 &&
+            html`<div class="gallery-warn small">
+                Not as installed (edited since, or gone): <span class="mono">${installed.changed.join(", ")}</span>
+            </div>`
+        }
+        <details class="gallery-technical">
+            <summary>Technical details</summary>
+            <${EntryFacts}
+                entry=${entry}
+                installed=${installed}
+                needs=${entry && `Pi Pocket ${entry.minPocket} or newer · extension API ${entry.pocketApi}`}
+            />
+            ${
+                files &&
+                html`<div class="group">
+                    <div class="group-title">Files</div>
+                    <div class="sheet-list gallery-files">
+                        ${files.map(
+                            (file) => html`<div class="gallery-file" key=${file.name}>
+                                <span class="mono">${file.name}</span>
+                                <span class="muted small">${formatBytes(file.size)}</span>
+                            </div>`,
+                        )}
+                    </div>
+                </div>`
+            }
+            <div class="group">
+                <div class="group-title">What it declares</div>
+                <${Declares} declares=${declares} />
+            </div>
+        </details>
     <//>`;
 }
 
@@ -770,7 +915,7 @@ function EntryFacts({ entry, installed, needs }) {
  * A theme's entry: what it is, its files, and installing, updating, and removing it. Installing puts it in the list in
  * Appearance; it changes nothing until someone chooses it there.
  */
-function ThemeEntry({ name, entry, installed, problem, busy, run }) {
+function ThemeEntry({ name, entry, installed, problem, busy, run, embedded }) {
     const title = installed?.title ?? entry.title;
     const files =
         entry && (!installed || entry.source.commit === installed.commit) ? entry.files : null;
@@ -795,7 +940,7 @@ function ThemeEntry({ name, entry, installed, problem, busy, run }) {
         }
     };
 
-    return html`<${Sheet} title=${title} onClose=${closeSheet} className="gallery">
+    return html`<${EntryFrame} title=${title} embedded=${embedded}>
         ${problem && html`<div class="error-box small">${problem}</div>`}
         ${
             (installed?.revoked ?? offeredRevoked) &&
@@ -817,35 +962,6 @@ function ThemeEntry({ name, entry, installed, problem, busy, run }) {
                 ${entry.tags.map((tag) => html`<span class="gallery-tag-text" key=${tag}>#${tag}</span>`)}
             </div>`
         }
-        <${EntryFacts}
-            entry=${entry}
-            installed=${installed}
-            needs=${entry && `Pi Pocket ${entry.minPocket} or newer · theme API ${entry.themeApi}`}
-        />
-        ${
-            installed?.problem &&
-            html`<div class="gallery-warn small">Appearance does not offer it as it is: ${installed.problem}</div>`
-        }
-        ${
-            installed?.changed.length > 0 &&
-            html`<div class="gallery-warn small">
-                Not as installed (edited since, or gone): <span class="mono">${installed.changed.join(", ")}</span>
-            </div>`
-        }
-        ${
-            files &&
-            html`<div class="group">
-                <div class="group-title">Files</div>
-                <div class="sheet-list gallery-files">
-                    ${files.map(
-                        (file) => html`<div class="gallery-file" key=${file.name}>
-                            <span class="mono">${file.name}</span>
-                            <span class="muted small">${formatBytes(file.size)}</span>
-                        </div>`,
-                    )}
-                </div>
-            </div>`
-        }
         <p class="gallery-warn small">${THEME_RISK}</p>
         <div class="gallery-actions">
             ${
@@ -864,7 +980,7 @@ function ThemeEntry({ name, entry, installed, problem, busy, run }) {
                 html`<button
                     class="button primary"
                     disabled=${busy}
-                    onClick=${() => openSheet({ type: "gallery-update", id: name })}
+                    onClick=${() => openGallerySheet("gallery-update", name)}
                 >
                     Update to ${installed.update.version}
                 </button>`
@@ -878,7 +994,7 @@ function ThemeEntry({ name, entry, installed, problem, busy, run }) {
             <button
                 class="button"
                 disabled=${busy}
-                onClick=${() => openSheet({ type: "gallery-source", id: name })}
+                onClick=${() => openGallerySheet("gallery-source", name)}
             >
                 View source
             </button>
@@ -887,6 +1003,38 @@ function ThemeEntry({ name, entry, installed, problem, busy, run }) {
                 html`<button class="button ghost" disabled=${busy} onClick=${uninstall}>Remove</button>`
             }
         </div>
+        ${
+            installed?.problem &&
+            html`<div class="gallery-warn small">Appearance does not offer it as it is: ${installed.problem}</div>`
+        }
+        ${
+            installed?.changed.length > 0 &&
+            html`<div class="gallery-warn small">
+                Not as installed (edited since, or gone): <span class="mono">${installed.changed.join(", ")}</span>
+            </div>`
+        }
+        <details class="gallery-technical">
+            <summary>Technical details</summary>
+            <${EntryFacts}
+                entry=${entry}
+                installed=${installed}
+                needs=${entry && `Pi Pocket ${entry.minPocket} or newer · theme API ${entry.themeApi}`}
+            />
+            ${
+                files &&
+                html`<div class="group">
+                    <div class="group-title">Files</div>
+                    <div class="sheet-list gallery-files">
+                        ${files.map(
+                            (file) => html`<div class="gallery-file" key=${file.name}>
+                                <span class="mono">${file.name}</span>
+                                <span class="muted small">${formatBytes(file.size)}</span>
+                            </div>`,
+                        )}
+                    </div>
+                </div>`
+            }
+        </details>
     <//>`;
 }
 
@@ -897,7 +1045,12 @@ export function GallerySourceSheet({ name }) {
 
     useRoute(`source/${encodeURIComponent(name)}`, setData, setProblem);
 
-    return html`<${Sheet} title=${data ? `Source: ${data.title}` : "Source"} onClose=${closeSheet} wide=${true} className="gallery">
+    return html`<${Sheet}
+        title=${data ? `Source: ${data.title}` : "Source"}
+        onClose=${closeSheet}
+        wide=${true}
+        className="gallery extension-detail-sheet"
+    >
         ${problem && html`<div class="error-box small">${problem}</div>`}
         ${!data && !problem && html`<${Loader} label="Getting its files" />`}
         ${
@@ -1021,7 +1174,13 @@ export function GalleryUpdateSheet({ name }) {
                 );
             }
 
-            openSheet({ type: "gallery-entry", id: name });
+            // A row can open review without an entry beneath it. Drop the completed review before
+            // showing the entry, so Back never returns to an obsolete update preview.
+            openSheet({
+                type: store.state.sheet.origin ?? "extensions",
+                tab: store.state.sheet.tab ?? "updates",
+            });
+            openGallerySheet("gallery-entry", name);
         }).finally(() => {
             going.current = false;
             setBusy(false);
@@ -1029,7 +1188,12 @@ export function GalleryUpdateSheet({ name }) {
     };
 
     if (data === null) {
-        return html`<${Sheet} title="Update" onClose=${closeSheet}>
+        return html`<${Sheet}
+            title="Update"
+            onClose=${closeSheet}
+            wide=${true}
+            className="gallery extension-detail-sheet"
+        >
             ${
                 problem
                     ? html`<div class="error-box small">${problem}</div>`
@@ -1041,7 +1205,12 @@ export function GalleryUpdateSheet({ name }) {
     const changes =
         data.declares === null ? [] : declarationChanges(data.declares.before, data.declares.after);
 
-    return html`<${Sheet} title=${`Update ${data.title}`} onClose=${closeSheet} wide=${true} className="gallery">
+    return html`<${Sheet}
+        title=${`Update ${data.title}`}
+        onClose=${closeSheet}
+        wide=${true}
+        className="gallery extension-detail-sheet"
+    >
         <dl class="pi-facts">
             <div>
                 <dt>From</dt>
