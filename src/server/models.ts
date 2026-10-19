@@ -103,6 +103,21 @@ export function findModel(models: ModelRuntime, spec: string): Model<Api> | unde
         : available.find((model) => model.id === trimmed);
 }
 
+/** Local metadata for one exact model, including models without configured auth. Never contacts a provider. */
+export function modelInfo(models: ModelRuntime, spec: string) {
+    const slash = spec.indexOf("/");
+    const model =
+        slash > 0 ? models.getModel(spec.slice(0, slash), spec.slice(slash + 1)) : undefined;
+
+    return model === undefined
+        ? undefined
+        : {
+              model: { provider: model.provider, modelId: model.id },
+              name: model.name,
+              thinkingLevels: capabilities(model).levels as ModelThinkingLevel[],
+          };
+}
+
 /** Whether `spec` (`provider/id`, or an id alone) names the model `ref`. */
 export function sameModel(spec: string, ref: ModelRef | undefined): boolean {
     const trimmed = spec.trim();

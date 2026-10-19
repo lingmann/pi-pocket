@@ -6,6 +6,18 @@ The host does not change when a module reloads. It changes only when the server 
 
 The types are `Host` and the types that it uses, in [types/pocket.d.ts](../../../types/pocket.d.ts). [Types for your editor](types.md) tells you how to import them.
 
+## Running version
+
+### `pocketVersion`
+
+```ts
+readonly pocketVersion: string;
+```
+
+Since 0.16.0 · Stable
+
+The running server's package version, including a pre-release suffix when present. It is read at server startup, not from files that an update replaced later. It is not the extension API level (`web.api`). Check that this member exists on older servers. A version-monitor extension can compare this value with a release obtained by its own server code, then show a notice; this member does not fetch updates or restart the server.
+
 ## Folders
 
 ### `dataDir`
@@ -61,6 +73,20 @@ resolveModel(spec: string): ModelRef;
 Since 0.1.0 · Stable
 
 Finds a model from `provider/modelId`, or from a model id alone. The model must be signed in, and its sign-in must work. When there is no such model, it throws an error. The error names no other models: the choice of model is the person's.
+
+### `modelInfo`
+
+```ts
+modelInfo(spec: string): {
+    model: ModelRef;
+    name: string;
+    thinkingLevels: ModelThinkingLevel[];
+} | undefined;
+```
+
+Since 0.16.0 · Stable
+
+Local metadata for one exact `provider/modelId`, including a known model without configured auth. A bare id or unknown pair returns `undefined`. It does not contact a provider, report sign-in details, or list models. Use it to describe the source model or a model already chosen by the owner. It does not authorize its use; starts still check the current model policy and availability.
 
 ### `subagentModels`
 

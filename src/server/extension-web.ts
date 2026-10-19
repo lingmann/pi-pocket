@@ -20,6 +20,7 @@ import type { User } from "./config.ts";
 import { describe } from "./errors.ts";
 import type {
     CommandInfo,
+    ConversationWebRequest,
     ExtensionCommand,
     ExtensionWeb,
     WebAccess,
@@ -159,7 +160,8 @@ interface Route {
     path: string;
     segments: string[];
     access: WebAccess;
-    handle: WebHandler;
+    handle: WebHandler | ((request: ConversationWebRequest) => unknown);
+    conversation?: string;
 }
 
 interface Client {
@@ -272,6 +274,21 @@ export class ExtensionWebs {
             route: (method, path, handle, options) => {
                 open("route");
                 part.routes.push(checkRoute(part, method, path, handle, options?.access));
+            },
+            conversationRoute: (method, path, handle, options) => {
+                open("conversationRoute");
+
+                const route = checkRoute(part, method, path, handle, options?.access);
+                const parameter = options?.conversation;
+
+                if (typeof parameter !== "string" || !route.segments.includes(`:${parameter}`)) {
+                    throw new Error(
+                        "web.conversationRoute: conversation must name a path parameter",
+                    );
+                }
+
+                route.conversation = parameter;
+                part.routes.push(route);
             },
             client: (entry, options) => {
                 open("client");

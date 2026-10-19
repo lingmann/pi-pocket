@@ -48,6 +48,21 @@ Adds a route at `/api/x/<module>/<path>`. `handle` answers its requests.
 
 [Routes](../routes.md) tells you about the checks that come before a handler, errors, and what to check in a handler.
 
+### `conversationRoute`
+
+```ts
+conversationRoute(
+    method: WebMethod,
+    path: string,
+    handle: (request: ConversationWebRequest) => unknown,
+    options: { conversation: string; access?: WebAccess },
+): void;
+```
+
+Since 0.16.0 · Stable
+
+Register a route with an authorized conversation binding. `conversation` names a required path parameter, without `:`: for `"runs/:source"`, use `{ conversation: "source" }`. Registration refuses a name not in the path. All ordinary route access and header checks still apply; people invited to one session cannot use it. Before the handler runs, GET requires seeing the actual source; other methods also require steering and the turn. Missing, invalid, private PiP, or inaccessible sources never reach the handler. Check `typeof web.conversationRoute === "function"` on older servers.
+
 ### `client`
 
 ```ts
@@ -142,6 +157,9 @@ interface WebRequest {
     readonly body: Readonly<Record<string, unknown>>;
     readonly user: Person;
     readonly signal: AbortSignal;
+    readonly snapshot: DocumentReader["snapshot"];
+    readonly context: Context;
+    commit<T>(change: (tx: Tx) => T | Promise<T>): Promise<T>;
 }
 ```
 
@@ -154,7 +172,61 @@ What a handler gets.
 - `query`: the query string. `pocket.api("usage?days=7")` sends `days`.
 - `body`: the JSON object that the browser sent. It is empty for GET and DELETE.
 - `user`: the person who asked, as `{ id, name, role }`.
-- `signal`: it aborts when the browser stops waiting for the answer. Give it to the work that the handler waits for.
+- `signal`: it aborts when the browser stops waiting for the answer, not on normal handler return. Give it to the work that the handler waits for.
+- Since 0.16.0, `snapshot` reads fresh committed documents with `context`. Its `context.abortSignal` is cancelled on disconnect or handler return, independently of the older `signal`. `commit` changes the module's own documents atomically and returns the callback's answer. Follow the `x.<module>.…` naming rule. Viewers cannot commit, even through a GET open to `view`.
+- Document operations recheck the current person. Retaining a request, its context, or a callback does not extend its lifetime: commits after disconnect or handler return are refused, and an unfinished callback rolls back. Await all writes before returning. These APIs are for module documents, not core's internal documents or a way to start model work.
+- An unbound catalog save has no source plan, turn, or spend checks. A bound commit also requires the source's current steering and turn rights.
+
+### `ConversationWebRequest`
+
+```ts
+interface ConversationWebRequest extends WebRequest {
+    readonly conversation: {
+        readonly id: ConversationId;
+        readonly title: string;
+        readonly cwd: string;
+        readonly model?: ModelRef;
+        readonly thinkingLevel: ModelThinkingLevel;
+    };
+    readonly linkedSessions: HumanLinkedSessions;
+}
+```
+
+Since 0.16.0 · Stable
+
+Authoritative source metadata, plus request-lifetime human linked-session capabilities. An omitted `model` means the source has none. Metadata is a snapshot, not a promise that settings cannot change. A start rejects a source model, thinking level, or folder changed while it waits.
+
+### `HumanLinkedSessions`
+
+```ts
+interface HumanLinkedSessions {
+    start(
+        request: { title?: string; message: string; model?: string; thinking?: ModelThinkingLevel },
+        key: string,
+    ): Promise<{ session: ConversationId; address: string }>;
+    list(): Promise<HumanLinkedSession[]>;
+}
+```
+
+Since 0.16.0 · Stable
+
+- `start` acts as the authenticated person and bound source, never the source's last requester. There is no actor override. Current seeing, steering, turn, plan, spend, team, model allow-list, and provider checks apply. The person must see all sessions to start one.
+- Explicit `thinking` must be supported and no higher than the source's level; it is never silently lowered. Omission inherits with the existing model cap policy. Use `host.modelInfo` for effective choices.
+- Use a stable, module-namespaced key. A receipt belongs to the same clicking person; a key recorded for someone else is a 409. Starts and their initial message reuse the existing linked-session receipt and request ids. No source message or source attribution is changed.
+- `list` returns only linked sessions the clicking person can see. GET needs seeing, not driving. It exposes ids for human navigation, not for a model transcript. Other metadata keeps the shared-audience rule.
+- Both methods end with the request. A start waits for admission of its initial message, not a model answer. The final authorization boundary is the start of Durable's submission admission on its mutation line. Intervening source/target policy changes invalidate the short admission lease; config, access, model allowance, and spend are checked again there. Once admitted, later cancellation or policy changes do not undo work.
+
+### `HumanLinkedSession`
+
+```ts
+interface HumanLinkedSession extends LinkedSession {
+    conversationId: ConversationId;
+}
+```
+
+Since 0.16.0 · Stable
+
+`conversationId` is visible to the authenticated person and can be passed to `pocket.openConversation`. `address` remains the source's opaque address. `title`, `cwd`, `busy`, and `archived` still show only when the source's whole audience sees this session.
 
 ### `WebMethod`
 

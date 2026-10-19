@@ -25,19 +25,51 @@ web.route("GET", "items/:id", ({ params }) => {
 
 ## The request
 
-`handle(request)` gets `{ method, params, query, body, user, signal }`:
+`handle(request)` gets `{ method, params, query, body, user, signal, snapshot, context, commit }`:
 
 - `params`: the `:name` parts of the path.
 - `query`: the query string, as `URLSearchParams`. For example, `pocket.api("usage?days=7")` sends `days`.
 - `body`: the JSON object that the browser sent. It is empty for `GET` and `DELETE`.
 - `user`: who asked, as `{ id, name, role }`.
-- `signal`: aborted when the browser stops waiting.
+- `signal`: aborted when the browser stops waiting. Normal handler return does not abort this signal.
+- Since 0.16.0, `snapshot` and `context` read fresh module documents. Unlike `signal`, `context.abortSignal` is cancelled on disconnect or handler return, ending the new document and linked-session capabilities. `commit(change)` writes them atomically and returns the callback's answer. It refuses viewers, and callbacks that finish after the request ends roll back. Await writes before returning; do not keep request capabilities in timers. Follow the `x.<module>.…` document naming rule. These are not APIs for changing core documents.
 
 What the handler returns goes back as JSON. `undefined` goes back as `{}`.
+
+## Bind a source conversation
+
+Since 0.16.0, use a distinct capability for routes that start work from a conversation:
+
+```typescript
+if (typeof web.conversationRoute !== "function") {
+    throw new Error("This module needs Pi Pocket 0.16.0. Update it and restart the server.");
+}
+
+web.conversationRoute(
+    "POST",
+    "runs/:source",
+    async (request) => {
+        const started = await request.linkedSessions.start(
+            { title: "Review", message: "Review the requested change." },
+            `x.my-module.review:${String(request.body.runKey)}`,
+        );
+
+        return started;
+    },
+    { conversation: "source", access: "owner" },
+);
+```
+
+`conversation` names a path parameter that must exist at registration. Before the handler runs, the server resolves the actual session and checks seeing; a mutation also needs steering and the turn. Ordinary route `access` still applies. GET can show a preview without taking the turn. `request.conversation` gives `{ id, title, cwd, model?, thinkingLevel }`. Do not take source settings from a browser body as authority; compare expected preview values with this metadata.
+
+`request.linkedSessions.start(request, key)` and `list()` act as the signed-in clicking person and bound source, not whoever last wrote to Pi there. There is no actor override. Starts check current plan, turn, spend, team and model policy; they reject a source folder/model/thinking change while they wait. Explicit thinking is never silently lowered. Give each logical role start a stable, module-namespaced key; another person cannot replay its receipt. The route waits for starts, not model answers. See [Starting and messaging sessions](linked-sessions.md#starts-from-a-human-page) and the [request reference](reference/web.md#conversationwebrequest).
+
+Use an ordinary owner-only `web.route` for an app-wide catalog save. Its document commit has no source plan, turn, or spend checks.
 
 ## Errors
 
 - To answer with an error, throw `web.error(status, message)`, with a status from 400 to 599. The person who asked gets the status and the message as they are. This includes guests and viewers, when the route is for them. Do not put in the message what you would not show them.
+- Core request capabilities report their own safe HTTP errors, for example a 409 when source settings changed.
 - Any other error is a 500, also an error that has a `status` of its own, as a provider's SDK gives. Such words can quote a key. The owner sees its message; other people see only that the extension failed. The server log has all of it.
 
 ## The app's own checks
@@ -53,7 +85,7 @@ A `:name` part is text from outside. Pi Pocket decodes the address before it spl
 
 ## Time
 
-A route has no time limit. A handler that waits keeps its request open until it answers, or until the browser stops waiting, which aborts `signal`. Give `signal` to what the handler waits for.
+A route has no time limit. A handler that waits keeps its request open until it answers, or until the browser stops waiting, which aborts `signal`. Handler return ends its document and linked-session capabilities too. Give `signal` to what the handler waits for. A linked start's final admission boundary is the start of Durable's admission transaction: once admitted, later cancellation does not undo the start.
 
 ## Who may use it
 

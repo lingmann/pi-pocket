@@ -57,6 +57,19 @@ export interface LinkedSessionsApi {
     list(source: ConversationId): Promise<LinkedSession[]>;
 }
 
+/** Human-facing linked sessions, bound to the signed-in person and source of one route request. */
+export interface HumanLinkedSession extends LinkedSession {
+    conversationId: ConversationId;
+}
+
+export interface HumanLinkedSessions {
+    start(
+        request: { title?: string; message: string; model?: string; thinking?: ModelThinkingLevel },
+        key: string,
+    ): Promise<{ session: ConversationId; address: string }>;
+    list(): Promise<HumanLinkedSession[]>;
+}
+
 export interface ApprovalRequest {
     id: string;
     conversationId: ConversationId;
@@ -192,6 +205,12 @@ export interface PocketHost {
     readonly approvals: Approvals;
     readonly agentDir: string;
     readonly dataDir: string;
+    /** The running server's Pi Pocket package version, not the extension API level. */
+    readonly pocketVersion: string;
+    /** Local metadata for an exact provider/modelId; no sign-in check or network request. */
+    modelInfo(
+        spec: string,
+    ): { model: ModelRef; name: string; thinkingLevels: ModelThinkingLevel[] } | undefined;
     /** Pi's configured extra skill paths, from its settings. */
     skillPaths(): string[];
     /** Pi's skills for a session working in `cwd`, from the places Pi looks (`skills.ts`). */
@@ -325,6 +344,23 @@ export interface WebRequest {
     readonly user: { readonly id: string; readonly name: string; readonly role: Role };
     /** Aborted when the browser stops waiting for the answer. */
     readonly signal: AbortSignal;
+    /** Fresh committed document reads. Use the request's context. */
+    readonly snapshot: DocumentReader["snapshot"];
+    readonly context: Context;
+    /** Change the module's documents; refused for viewers and after this request ends. */
+    commit<T>(change: (tx: Tx) => T | Promise<T>): Promise<T>;
+}
+
+/** A route request whose named path parameter resolved to a visible conversation. */
+export interface ConversationWebRequest extends WebRequest {
+    readonly conversation: {
+        readonly id: ConversationId;
+        readonly title: string;
+        readonly cwd: string;
+        readonly model?: ModelRef;
+        readonly thinkingLevel: ModelThinkingLevel;
+    };
+    readonly linkedSessions: HumanLinkedSessions;
 }
 
 /**
@@ -350,6 +386,13 @@ export interface ExtensionWeb {
         path: string,
         handle: WebHandler,
         options?: { access?: WebAccess },
+    ): void;
+    /** Bind a named path parameter to a conversation before calling the handler. */
+    conversationRoute(
+        method: WebMethod,
+        path: string,
+        handle: (request: ConversationWebRequest) => unknown,
+        options: { conversation: string; access?: WebAccess },
     ): void;
     /**
      * The browser module that adds to the app: a `.js` file beside this module, or a folder with an `index.js` and the
