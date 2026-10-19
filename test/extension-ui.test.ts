@@ -368,7 +368,9 @@ test("Lancet Guard stays on until its inline confirmation is accepted", real, as
     await app.setExtensionEnabled(owner(app), "guard.ts", true);
     await page.navigate(`${base}/s/${session}`);
     await until(() => has(".composer"), "the conversation");
-    await inPage(`(await import("/store.js")).openSheet({ type: "extensions" }); return "null";`);
+    await inPage(
+        `(await import("/store.js")).openSheet({ type: "extensions", tab: "installed" }); return "null";`,
+    );
     await until(() => has('.switch[aria-label="Lancet Guard: on"]'), "the guard switch");
     await settled();
     await inPage(

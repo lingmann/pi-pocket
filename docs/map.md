@@ -188,6 +188,8 @@ Plain ES modules, loaded as they are. `store.js` holds the shared state, and not
 
 Manual refresh lives in `src/server/model-refresh.ts`, owned by `Providers.modelRefresh`; `web/model-refresh.js` shares the refresh and its feedback between the menu, Providers, and the launcher. `test/model-refresh.test.ts` checks local configuration, external sign-ins, provider isolation, cancellation, session use, and endpoint access.
 
+The Extensions hub in `sheets/gallery.js` shares one listing between Discover, Installed, Updates, and the selected entry. `sheets.js` maps its sheet routes to one retained hub; `sheets/extensions.js` supplies the built-in and local drop-in management controls for Installed, and the standalone sheet when the gallery is unavailable.
+
 PiP's `pip-window.js` handles pointer resize zones and the account/browser size preference.
 
 The menu in `sheets/menu.js` keeps `Sheet`'s focus, Escape, drag-to-close, and the sheet trail's Back behavior. Its `MenuFrame` positions it below the top bar's menu button at ≥700px, and adds arrow navigation and focus return; below that width it stays a bottom sheet. `PlacesSheet` uses the same three-column tiles.

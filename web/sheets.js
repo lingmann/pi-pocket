@@ -6,12 +6,11 @@ import { NotificationsSheet } from "./notify.js";
 import { ShareSheet } from "./share.js";
 import { AppearanceSheet } from "./sheets/appearance.js";
 import { BranchPicker } from "./sheets/branch.js";
-import { ExtensionsSheet } from "./sheets/extensions.js";
+import { ExtensionsContent, ExtensionsSheet } from "./sheets/extensions.js";
 import { FileSheet } from "./sheets/file.js";
 import { FindSheet } from "./sheets/find.js";
 import {
     galleryAvailable,
-    GalleryEntrySheet,
     GalleryShareSheet,
     GallerySheet,
     GallerySourceSheet,
@@ -41,8 +40,14 @@ import { Boundary, html, Icon, SheetBack, SheetInfo, usePresence } from "./ui.js
 
 // ─── Back ─────────────────────────────────────────────────────────────────────────
 
-/** What tells sheets apart: the same one changing (its query, say) stays one step back. */
-const sheetKey = (sheet) => `${sheet.type}:${sheet.entryId ?? sheet.id ?? ""}`;
+// Identity must not change when Installed turns the gallery module on or off.
+const isExtensionHub = (sheet) => ["extensions", "gallery", "gallery-entry"].includes(sheet.type);
+
+/** A hub selection is one step back, even when desktop browsing changes the selected entry. */
+const sheetKey = (sheet) =>
+    isExtensionHub(sheet)
+        ? `extension-hub:${sheet.type === "gallery-entry" ? "entry" : "list"}`
+        : `${sheet.type}:${sheet.entryId ?? sheet.id ?? ""}`;
 
 /**
  * The sheets opened one from another, oldest first (the menu, then the model picker it opened): each is a step back,
@@ -156,7 +161,9 @@ export function Sheets() {
         return auth;
     }
 
-    const key = `${sheet.type}:${sheet.entryId ?? sheet.id ?? sheet.pipId ?? ""}`;
+    const key = isExtensionHub(sheet)
+        ? "extension-hub"
+        : `${sheet.type}:${sheet.entryId ?? sheet.id ?? sheet.pipId ?? ""}`;
 
     return html`<div class=${`sheet-host ${leaving ? "leaving" : ""}`} inert=${leaving}>
         <${SheetBack.Provider} value=${trail.length > 1 ? goBack : null}>
@@ -200,15 +207,18 @@ function sheetBody(sheet) {
             body = html`<${ProvidersSheet} />`;
             break;
         case "extensions":
-            body = html`<${ExtensionsSheet} />`;
-            break;
         case "gallery":
-            body = galleryAvailable() ? html`<${GallerySheet} />` : null;
-            break;
         case "gallery-entry":
             body = galleryAvailable()
-                ? html`<${GalleryEntrySheet} key=${sheet.id} name=${sheet.id} />`
-                : null;
+                ? html`<${GallerySheet}
+                      selected=${sheet.type === "gallery-entry" ? sheet.id : null}
+                      tab=${sheet.tab ?? "discover"}
+                      origin=${sheet.origin ?? (sheet.type === "gallery" ? "gallery" : "extensions")}
+                      Management=${ExtensionsContent}
+                  />`
+                : sheet.type === "extensions"
+                  ? html`<${ExtensionsSheet} />`
+                  : null;
             break;
         case "gallery-source":
             body = galleryAvailable()

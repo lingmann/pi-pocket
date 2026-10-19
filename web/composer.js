@@ -1797,7 +1797,7 @@ function StatusLine() {
                 class=${`guard ${guard.enabled && !failed ? "" : "off"}`}
                 aria-label=${`Lancet Guard ${state}`}
                 title=${guard.detail}
-                onClick=${() => openSheet({ type: "extensions" })}
+                onClick=${() => openSheet({ type: "extensions", tab: "installed" })}
             >
                 <${Icon} name="shield" size=${11} />
                 <span><span class="word">guard${" "}</span>${state}</span>

@@ -14601,6 +14601,304 @@ textarea.notes {
 
 /* ─── Extension gallery ────────────────────────────────────── */
 
+/* One workspace for discovery and upkeep, not a stack of narrow pickers. */
+.sheet.extension-hub {
+    max-width: 1280px;
+}
+
+.extension-hub-tabs {
+    display: flex;
+    gap: 6px;
+    border-bottom: 1px solid var(--hair);
+    padding-bottom: 10px;
+}
+
+.extension-hub-tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 42px;
+    padding: 9px 16px;
+    border: 1px solid transparent;
+    border-radius: var(--r-control);
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.extension-hub-tab.on {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: var(--hair);
+}
+
+.extension-hub-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+}
+
+.extension-hub-toolbar .find-input {
+    flex: 1;
+    min-width: 160px;
+    margin: 0;
+}
+
+.extension-hub-toolbar .gallery-tags {
+    flex-basis: 100%;
+}
+
+.extension-hub-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+    gap: 20px;
+}
+
+.extension-hub-list,
+.extension-hub-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+}
+
+.extension-hub-list .gallery-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow: visible;
+    border: 0;
+    background: transparent;
+}
+
+.gallery-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card);
+    background: var(--bg);
+    transition:
+        border-color var(--t-hover) var(--ease-out),
+        background-color var(--t-hover) var(--ease-out);
+}
+
+.gallery-list > .gallery-card:not(:first-child) {
+    border-top: 1px solid var(--hair);
+}
+
+.gallery-card.selected,
+.gallery-card[aria-current="true"] {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.gallery-card-open {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.gallery-card .gallery-row-title {
+    font-size: 15px;
+    line-height: 1.4;
+}
+
+.gallery-card .gallery-row-desc {
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.gallery-card .gallery-row-name {
+    display: none;
+}
+
+.gallery-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.gallery-card-actions:empty {
+    display: none;
+}
+
+.gallery-card-actions .button {
+    min-height: 40px;
+}
+
+.gallery-entry-content,
+.extension-management {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+}
+
+.gallery-entry-content .pi-title {
+    font-size: 22px;
+    line-height: 1.3;
+}
+
+.gallery-entry-content .gallery-description {
+    font-size: 14px;
+    line-height: 1.7;
+}
+
+.gallery-entry-content .gallery-actions {
+    margin: 0;
+}
+
+.extension-hub-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    min-height: 220px;
+    padding: 32px;
+    color: var(--muted);
+    text-align: center;
+    line-height: 1.6;
+}
+
+.extension-hub-detail-back {
+    align-self: flex-start;
+    min-height: 40px;
+}
+
+.extension-hub-layout.installed .extension-hub-list > .extension-hub-empty {
+    min-height: 0;
+    padding: 0;
+    align-items: flex-start;
+    text-align: left;
+    font-size: 12px;
+}
+
+.gallery-technical {
+    border-top: 1px solid var(--hair);
+    padding-top: 14px;
+}
+
+.gallery-technical > summary {
+    padding: 6px 0;
+    color: var(--muted);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.gallery-technical[open] > summary {
+    margin-bottom: 16px;
+}
+
+.gallery-technical > .group + .group {
+    margin-top: 16px;
+}
+
+@media (hover: hover) {
+    .extension-hub-tab:hover {
+        color: var(--text);
+        background: var(--card);
+    }
+    .gallery-card:hover {
+        border-color: var(--hair-2);
+    }
+    .gallery-card-open:hover .gallery-row-title {
+        color: var(--accent);
+    }
+}
+
+@media (min-width: 1000px) {
+    .sheet.extension-hub {
+        height: min(900px, 88dvh);
+        max-height: 88dvh;
+    }
+    .extension-hub > .sheet-body {
+        overflow: hidden;
+        padding: 20px 24px 24px;
+        gap: 18px;
+    }
+    .extension-hub-layout {
+        flex: 1;
+        flex-shrink: 1;
+        grid-template-columns: minmax(320px, 0.85fr) minmax(0, 1.15fr);
+        gap: 24px;
+        overflow: hidden;
+    }
+    .extension-hub-list,
+    .extension-hub-detail {
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-gutter: stable;
+        padding-right: 8px;
+    }
+    .extension-hub-detail {
+        border-left: 1px solid var(--hair);
+        padding-left: 24px;
+    }
+    .extension-hub-detail-back {
+        display: none;
+    }
+    .extension-hub-layout:is(.installed, .updates):not(.has-selection) {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .extension-hub-layout:is(.installed, .updates):not(.has-selection) > .extension-hub-detail {
+        display: none;
+    }
+    .extension-hub-layout:is(.installed, .updates):not(.has-selection) .gallery-list,
+    .extension-hub-layout.installed:not(.has-selection) .extension-management .group > .sheet-list {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        border: 0;
+        background: transparent;
+        overflow: visible;
+    }
+    .extension-hub-layout.installed:not(.has-selection) .extension {
+        border: 1px solid var(--hair);
+        border-radius: var(--r-card);
+        padding: 16px;
+    }
+    .extension-hub-empty {
+        flex: 1;
+    }
+    .sheet.gallery:not(.extension-hub) {
+        max-width: 1000px;
+    }
+}
+
+@media (max-width: 999px) {
+    .extension-hub:has(.extension-hub-layout.has-selection) .extension-hub-toolbar {
+        display: none;
+    }
+    .extension-hub-layout:not(.has-selection) .gallery-card.selected {
+        border-color: var(--hair);
+        background: var(--bg);
+    }
+    .extension-hub-layout.has-selection > .extension-hub-list,
+    .extension-hub-layout:not(.has-selection) > .extension-hub-detail {
+        display: none;
+    }
+    .extension-hub-tab {
+        flex: 1;
+        padding-inline: 10px;
+    }
+}
+
 /* A row of the Browse list: what it is, its tags, and how it stands here. */
 .gallery-row {
     display: grid;
