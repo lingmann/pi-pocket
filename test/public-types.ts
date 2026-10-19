@@ -4,6 +4,9 @@
 import type {
     CommandContext as RealCommandContext,
     CommandResult as RealCommandResult,
+    ConversationWebRequest as RealConversationWebRequest,
+    HumanLinkedSession as RealHumanLinkedSession,
+    HumanLinkedSessions as RealHumanLinkedSessions,
     ExtensionCommand,
     ExtensionModule,
     ExtensionWeb,
@@ -15,6 +18,9 @@ import type {
     Command,
     CommandContext,
     CommandResult,
+    ConversationWebRequest,
+    HumanLinkedSession,
+    HumanLinkedSessions,
     Host,
     LinkedSession,
     Module,
@@ -61,6 +67,15 @@ export const contextMembers = (
 // Methods compare their parameters both ways, so the shapes they take are checked here on their own.
 export const request = (real: RealWebRequest): WebRequest => real;
 export const requestBack = (types: WebRequest): RealWebRequest => types;
+export const conversationRequest = (real: RealConversationWebRequest): ConversationWebRequest =>
+    real;
+export const conversationRequestBack = (
+    types: ConversationWebRequest,
+): RealConversationWebRequest => types;
+export const humanLinked = (real: RealHumanLinkedSession): HumanLinkedSession => real;
+export const humanLinkedBack = (types: HumanLinkedSession): RealHumanLinkedSession => types;
+export const humanLinks = (real: RealHumanLinkedSessions): HumanLinkedSessions => real;
+export const humanLinksBack = (types: HumanLinkedSessions): RealHumanLinkedSessions => types;
 export const command = (real: ExtensionCommand): Command => real;
 export const commandBack = (types: Command): ExtensionCommand => types;
 export const result = (real: RealCommandResult): CommandResult => real;

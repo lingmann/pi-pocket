@@ -3,6 +3,9 @@
 import {
     type App,
     cleanUp,
+    context,
+    newSession,
+    modelTexts,
     fakeTab,
     openApp,
     owner,
@@ -24,14 +27,36 @@ import { createServer, type Server } from "node:http";
 import { connect } from "node:net";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import type { ExtensionWeb } from "../src/server/host.ts";
+import type {
+    ConversationWebRequest,
+    ExtensionWeb,
+    PocketHost,
+    WebRequest,
+} from "../src/server/host.ts";
+import { AgentDoc, defineDoc, type ConversationId } from "@earendil-works/pi-durable";
+import { pocketVersion } from "../src/server/versions.ts";
+import { ExtensionWebs } from "../src/server/extension-web.ts";
+import { PlanDoc, TurnsDoc } from "../src/server/docs.ts";
 import { createHandler } from "../src/server/http.ts";
 import { opened } from "../src/server/http/io.ts";
 
 const dataDir = join(root, "data");
 const dropIns = join(dataDir, "extensions");
 /** What the test modules leave on `globalThis`: their `web`, and how many of their versions were cleaned up. */
-const seen = globalThis as unknown as { panelWeb?: ExtensionWeb; panelGone?: number };
+const seen = globalThis as unknown as {
+    panelWeb?: ExtensionWeb;
+    panelGone?: number;
+    workspaceRequest?: WebRequest | ConversationWebRequest;
+    workspaceHost?: PocketHost;
+    workspaceGate?: Promise<void>;
+    workspaceWrite?: Promise<unknown>;
+};
+const Catalog = defineDoc({
+    kind: "x.workspace.catalog",
+    version: 1,
+    scope: "session",
+    initial: () => ({ saved: 0 }),
+});
 
 /** A module with routes for every kind of person, and a folder of browser files for everyone with every session. */
 const panel = (
@@ -76,6 +101,43 @@ before(async () => {
     );
     writeFileSync(join(dropIns, "solo.js"), "export default () => {};\n");
     writeFileSync(join(dropIns, "other.js"), "export const other = true;\n");
+    writeFileSync(
+        join(dropIns, "workspace.ts"),
+        `/** Workspace: request-bound test routes. */
+import { defineDoc } from "@earendil-works/pi-durable";
+const Catalog = defineDoc({ kind: "x.workspace.catalog", version: 1, scope: "session", initial: () => ({ saved: 0 }) });
+export default function(host, web) {
+    globalThis.workspaceHost = host;
+    web.route("GET", "catalog", async req => {
+        globalThis.workspaceRequest = req;
+        return await req.snapshot(Catalog, req.context) ?? { saved: 0 };
+    }, { access: "view" });
+    web.route("POST", "catalog", req => req.commit(async tx => ++(await tx.doc(Catalog)).saved));
+    web.route("GET", "viewer-write", req => req.commit(async tx => ++(await tx.doc(Catalog)).saved), { access: "view" });
+    web.route("GET", "wait", async req => {
+        globalThis.workspaceRequest = req;
+        await globalThis.workspaceGate;
+        return {};
+    });
+    web.route("GET", "detached", req => {
+        globalThis.workspaceRequest = req;
+        globalThis.workspaceWrite = req.commit(async tx => {
+            (await tx.doc(Catalog)).saved++;
+            await globalThis.workspaceGate;
+        }).catch(error => error);
+        return {};
+    });
+    web.conversationRoute("GET", "source/:source", async req => {
+        globalThis.workspaceRequest = req;
+        return { conversation: req.conversation, linked: await req.linkedSessions.list() };
+    }, { conversation: "source", access: "view" });
+    web.conversationRoute("POST", "start/:source", req => {
+        globalThis.workspaceRequest = req;
+        return req.linkedSessions.start(req.body, req.body.key);
+    }, { conversation: "source", access: "view" });
+}
+`,
+    );
     app = await openApp(scriptedModel(), dataDir);
     server = createServer(
         createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
@@ -96,6 +158,7 @@ before(async () => {
     people.owner = { token: app.config.ownerToken, id: owner(app).id };
     await app.setExtensionEnabled(owner(app), "panel.ts", true);
     await app.setExtensionEnabled(owner(app), "solo.ts", true);
+    await app.setExtensionEnabled(owner(app), "workspace.ts", true);
 });
 
 after(async () => {
@@ -433,4 +496,314 @@ test("a file is served only when what was opened is the file that was checked", 
     } finally {
         closeSync(fd);
     }
+});
+
+test("route documents are fresh, non-viewer writes that end with their request", async () => {
+    assert.equal(
+        (await call("owner", "/api/x/workspace/catalog", { method: "POST", body: {} })).status,
+        200,
+    );
+    assert.deepEqual((await call("owner", "/api/x/workspace/catalog")).data, { saved: 1 });
+    const captured = seen.workspaceRequest!;
+
+    assert.equal(captured.context.abortSignal?.aborted, true);
+    assert.equal(captured.signal.aborted, false, "normal completion keeps the legacy signal live");
+    await assert.rejects(
+        captured.commit(async (tx) => {
+            (await tx.doc(Catalog)).saved++;
+        }),
+        /ended/,
+    );
+    assert.equal((await call("Vic", "/api/x/workspace/viewer-write")).status, 403);
+
+    let release!: () => void;
+
+    seen.workspaceGate = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    await call("owner", "/api/x/workspace/detached");
+    release();
+    assert.ok((await seen.workspaceWrite) instanceof Error);
+    assert.equal((await app.harness.snapshot(Catalog, context))?.saved, 1);
+
+    // A disconnected handler still waiting cannot keep a live capability either.
+    seen.workspaceGate = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    const previous = seen.workspaceRequest;
+    const stopped = new AbortController();
+    const waiting = fetch(`${base}/api/x/workspace/wait`, {
+        headers: { authorization: `Bearer ${people.owner!.token}`, "x-pocket": "1" },
+        signal: stopped.signal,
+    }).catch(() => {});
+
+    await until(() => seen.workspaceRequest !== previous, "the waiting request");
+    stopped.abort();
+    await waiting;
+    await until(() => seen.workspaceRequest!.signal.aborted, "request cancellation");
+    assert.equal(seen.workspaceRequest!.context.abortSignal?.aborted, true);
+    await assert.rejects(
+        seen.workspaceRequest!.commit(() => {}),
+        /ended/,
+    );
+    release();
+});
+
+test("bound routes use the clicking actor, keep receipts private, and expose authorized navigation metadata", async () => {
+    const stage = new ExtensionWebs().stage("check.ts", dropIns, "Check");
+
+    assert.throws(
+        () =>
+            stage.web.conversationRoute("GET", "source/:id", () => ({}), {
+                conversation: "missing",
+            }),
+        /path parameter/,
+    );
+    const id = await newSession(app);
+    const gale = app.config.userById(people.Gale!.id)!;
+
+    await app.commands.submit(id, gale, { text: "hello", requestId: "source-requester" });
+    const request = { title: "Human role", message: "a human task", key: "human-start" };
+    const start = () =>
+        call("owner", `/api/x/workspace/start/${id}`, { method: "POST", body: request });
+    const first = await start();
+
+    assert.equal(first.status, 200);
+    const target = (first.data as { session: ConversationId }).session;
+
+    await until(
+        () => app.attribution.requesterOf(target) === owner(app).id,
+        "the clicking actor's attribution",
+    );
+    assert.equal(app.attribution.requesterOf(id), gale.id);
+    assert.deepEqual((await start()).data, first.data);
+    assert.equal(
+        (await call("Gale", `/api/x/workspace/start/${id}`, { method: "POST", body: request }))
+            .status,
+        409,
+    );
+    const count = app.sessions().length;
+
+    assert.equal(
+        (
+            await call("owner", `/api/x/workspace/start/${id}`, {
+                method: "POST",
+                body: { ...request, key: "thinking", thinking: "high" },
+            })
+        ).status,
+        400,
+    );
+    assert.equal(app.sessions().length, count);
+
+    await app.harness.commit(
+        async (tx) =>
+            Object.assign(await tx.doc(TurnsDoc, id), { on: true, driver: gale.id, asks: [] }),
+        context,
+    );
+    const view = await call("Vic", `/api/x/workspace/source/${id}`);
+
+    assert.equal(view.status, 200);
+    const data = view.data as {
+        conversation: {
+            id: number;
+            cwd: string;
+            thinkingLevel: string;
+            model: { provider: string; modelId: string };
+        };
+        linked: { conversationId: number }[];
+    };
+
+    assert.equal(data.conversation.id, Number(id));
+    assert.equal(data.conversation.thinkingLevel, "off");
+    assert.ok(data.linked.some((each) => each.conversationId === Number(target)));
+    assert.equal(
+        (await call("Vic", `/api/x/workspace/start/${id}`, { method: "POST", body: request }))
+            .status,
+        403,
+    );
+    await assert.rejects(
+        (seen.workspaceRequest as ConversationWebRequest).linkedSessions.list(),
+        /ended/,
+    );
+    // An owner catalog save has no source turn, plan, or spend admission policy.
+    assert.equal(
+        (await call("owner", "/api/x/workspace/catalog", { method: "POST", body: {} })).status,
+        200,
+    );
+    assert.equal(seen.workspaceHost!.pocketVersion, pocketVersion());
+    assert.deepEqual(seen.workspaceHost!.modelInfo("faux/faux-1")?.thinkingLevels, ["off"]);
+    assert.equal(seen.workspaceHost!.modelInfo("faux-1"), undefined);
+    assert.equal(
+        ((await call("owner", "/api/me")).data as { server: { pocketVersion: string } }).server
+            .pocketVersion,
+        pocketVersion(),
+    );
+});
+
+/** Pause the network-facing model check, then change policy before it answers. */
+async function whileChecking(
+    t: import("node:test").TestContext,
+    change: (id: ConversationId) => Promise<void> | void,
+    who = "owner",
+    model?: string,
+) {
+    const id = await newSession(app);
+    const count = app.sessions().length;
+    let release!: () => void;
+    let checking = false;
+    const gate = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+
+    t.mock.method(app.providers, "problem", async () => {
+        checking = true;
+        await gate;
+
+        return undefined;
+    });
+    const pending = call(who, `/api/x/workspace/start/${id}`, {
+        method: "POST",
+        body: { message: "a task", key: "paused", model },
+    });
+
+    await until(() => checking, "the model check");
+    await change(id);
+    release();
+    const answer = await pending;
+
+    assert.equal(app.sessions().length, count);
+
+    return answer;
+}
+
+test("human starts recheck the person's current access after model checks", async (t) => {
+    const answer = await whileChecking(
+        t,
+        () => {
+            app.config.updateUser(people.Gale!.id, { role: "viewer" });
+        },
+        "Gale",
+    );
+
+    app.config.updateUser(people.Gale!.id, { role: "guest" });
+    assert.equal(answer.status, 403);
+});
+
+test("a policy change queued between final authorization and admission cancels only that admission", async (t) => {
+    const source = await newSession(app);
+    let target!: ConversationId;
+    const submit = app.commands.submit.bind(app.commands);
+
+    t.mock.method(
+        app.commands,
+        "submit",
+        async (...[id, user, request, via, admission]: Parameters<typeof submit>) => {
+            target = id;
+
+            return submit(
+                id,
+                user,
+                request,
+                via,
+                admission && {
+                    ...admission,
+                    beforeSubmit: async () => {
+                        const accepted = await admission.beforeSubmit();
+
+                        await app.harness.commit(async (tx) => {
+                            (await tx.doc(PlanDoc, source)).on = true;
+                        }, context);
+                        assert.equal(
+                            seen.workspaceRequest!.context.abortSignal?.aborted,
+                            false,
+                            "only the admission lease is cancelled",
+                        );
+
+                        return accepted;
+                    },
+                },
+            );
+        },
+    );
+    const answer = await call("owner", `/api/x/workspace/start/${source}`, {
+        method: "POST",
+        body: { message: "not admitted", key: "policy-race" },
+    });
+
+    assert.equal(answer.status, 409);
+    assert.deepEqual(await modelTexts(app, target), []);
+});
+
+test("a reconfigured target cannot substitute another allowed model for the approved start", async (t) => {
+    const source = await newSession(app);
+
+    await app.allowSubagentModel(owner(app), "faux/faux-2", true);
+    let target!: ConversationId;
+    const submit = app.commands.submit.bind(app.commands);
+
+    t.mock.method(
+        app.commands,
+        "submit",
+        async (...[id, user, request, via, admission]: Parameters<typeof submit>) => {
+            target = id;
+            await app.harness.commit(async (tx) => {
+                (await tx.doc(AgentDoc, id)).model = { provider: "faux", modelId: "faux-2" };
+            }, context);
+
+            return submit(id, user, request, via, admission);
+        },
+    );
+    const answer = await call("owner", `/api/x/workspace/start/${source}`, {
+        method: "POST",
+        body: { message: "not substituted", key: "target-race" },
+    });
+
+    assert.equal(answer.status, 409);
+    assert.deepEqual(await modelTexts(app, target), []);
+    await app.allowSubagentModel(owner(app), "faux/faux-2", false);
+});
+
+test("human creation inherits fresh non-selection source settings after provider checks", async (t) => {
+    const source = await newSession(app);
+
+    t.mock.method(app.providers, "problem", async () => {
+        await app.harness.commit(async (tx) => {
+            (await tx.doc(AgentDoc, source)).instructions = "Fresh instructions";
+        }, context);
+
+        return undefined;
+    });
+    const answer = await call("owner", `/api/x/workspace/start/${source}`, {
+        method: "POST",
+        body: { message: "fresh inheritance", key: "fresh-agent" },
+    });
+
+    assert.equal(answer.status, 200);
+    const target = (answer.data as { session: ConversationId }).session;
+
+    assert.equal((await app.agentState(target))?.instructions, "Fresh instructions");
+});
+
+test("human starts reject a source folder changed after its request preview", async (t) => {
+    const answer = await whileChecking(t, (id) =>
+        app.harness.commit(async (tx) => {
+            (await tx.doc(AgentDoc, id)).cwd = root;
+        }, context),
+    );
+
+    assert.equal(answer.status, 409);
+});
+
+test("human starts recheck the allowed model after model checks", async (t) => {
+    await app.allowSubagentModel(owner(app), "faux/faux-2", true);
+    const answer = await whileChecking(
+        t,
+        async () => {
+            await app.allowSubagentModel(owner(app), "faux/faux-2", false);
+        },
+        "owner",
+        "faux/faux-2",
+    );
+
+    assert.equal(answer.status, 403);
 });

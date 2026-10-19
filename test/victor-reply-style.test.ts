@@ -307,6 +307,67 @@ for (const initial of ["victor", undefined] as const) {
     });
 }
 
+test("source reservation precedes the final admission lease and survives a rejected admission", async (t) => {
+    const seen: Seen[] = [];
+    const { app, id } = await fixture(t, (request) => {
+        seen.push(observe(request));
+
+        return answer();
+    });
+    const user = owner(app);
+    const key = "source-before-final-admission";
+    const requestId = ownRequest(user.id, key);
+    const rejected = new Error("policy changed before admission");
+    let accept = false;
+    let released = 0;
+    const admission = {
+        beforeSubmit: async () => {
+            const recorded = await app.harness.snapshot(InputSourceDoc, id, requestId, context);
+
+            assert.equal(recorded?.source, "victor", "source is reserved before the lease");
+
+            if (!accept) {
+                throw rejected;
+            }
+
+            return { user, context };
+        },
+        afterSubmit: () => {
+            released++;
+        },
+    };
+
+    await assert.rejects(
+        app.commands.submit(
+            id,
+            user,
+            { text: "Voice work", requestId: key, source: "victor" },
+            undefined,
+            admission,
+        ),
+        (error) => error === rejected,
+    );
+    assert.equal(
+        await app.harness.commit((tx) => tx.submissionByRequest(id, requestId), context),
+        undefined,
+    );
+    assert.equal(seen.length, 0);
+    assert.equal(released, 0, "a rejected lease was never acquired");
+    accept = true;
+    const retry = await app.commands.submit(
+        id,
+        user,
+        { text: "Voice work", requestId: key },
+        undefined,
+        admission,
+    );
+
+    assert.equal(released, 1, "the accepted lease is released when submission settles");
+    await wait(app, retry.submissionId);
+    assert.equal(seen.length, 1);
+    assertVoice(seen[0]!);
+});
+
 test("source reservation survives interrupted admission and active voice survives a restart", async (t) => {
     const seen: Seen[] = [];
     let started = false;

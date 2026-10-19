@@ -42,3 +42,11 @@ Observed in the merged Victor checkout on macOS, Node 24.22.0, and Chromium. The
 | `linked-sessions.test.ts`                                | After a guest submits, `linkedSessions.list(target)` still returns an origin address instead of `[]`. | Repeated in a focused run with the model-provider environment keys removed. Origin title and folder are absent; guest attribution/admission timing remains unverified.                              |
 | `main.test.ts`                                           | Early-restart child exits with `SIGUSR2` instead of code 75.                                          | Repeated in a focused run. On macOS the test cannot inspect `/proc`, so it sends the signal after a fixed 300 ms rather than observing handler readiness.                                           |
 | `extension-loader.test.ts`                               | Owner-only reload notice times out waiting for “the failure is told”.                                 | Passed in the full run, failed in a later focused group, then passed alone. The test edits a watched file; the passing rerun does not establish a fix or cause.                                     |
+
+## v0.16.0: New session shortcut on macOS
+
+Observed in the merged Victor checkout on macOS, Node 24.22.0, and Chromium. The original release has not been tested.
+
+`launcher-ui.test.ts`'s **New session here starts in the open session's folder** times out waiting for “the New session picker at the session's folder” after `Alt+n`, before opening the launcher. Desktop navigation focuses the composer (`web/composer.js`); `web/app.js` suppresses Alt shortcuts while typing on Apple platforms. This is consistent with the earlier Alt+number issue, but is a newly observed test signature. The test and shortcut implementation are unchanged by this merge.
+
+The full run passed 750 of 758 tests. The other seven failures matched previously recorded path, launcher-focus, and early-restart signatures. No unrelated fixes or upstream comparison were performed.

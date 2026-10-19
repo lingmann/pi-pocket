@@ -77,7 +77,8 @@ import { victorReplyMode } from "./victor-replies.ts";
 import { type GuardStatus, LancetGuard } from "./lancet.ts";
 import { takeLock } from "./lock.ts";
 import { Memory } from "./memory.ts";
-import { isThinkingLevel, modelList, resolveModel, THINKING_LEVELS } from "./models.ts";
+import { isThinkingLevel, modelInfo, modelList, resolveModel, THINKING_LEVELS } from "./models.ts";
+import { pocketVersion } from "./versions.ts";
 import { configureHttp } from "./net.ts";
 import { PiSessions } from "./pi-sessions.ts";
 import { Hooks } from "./hooks.ts";
@@ -510,6 +511,8 @@ export class PocketApp {
             approvals: this.approvals,
             agentDir: getAgentDir(),
             dataDir: this.dataDir,
+            pocketVersion: pocketVersion(),
+            modelInfo: (spec) => modelInfo(this.models, spec),
             skillPaths: () => {
                 try {
                     return this.settings.getSkillPaths();
@@ -1727,6 +1730,7 @@ export class PocketApp {
             models: await this.modelList(),
             guard: await this.guardStatus(),
             server: {
+                pocketVersion: pocketVersion(),
                 supervised: this.supervised,
                 startedAt: this.startedAt,
                 home: homedir(),

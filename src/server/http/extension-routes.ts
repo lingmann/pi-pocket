@@ -7,6 +7,9 @@ import type { PocketApp } from "../app.ts";
 import type { User } from "../config.ts";
 import { describe, HttpError } from "../errors.ts";
 import { exposedError, MAX_FILE_BYTES } from "../extension-web.ts";
+import { ExtensionRequest } from "../extension-request.ts";
+import type { ConversationId } from "@earendil-works/pi-durable";
+import type { ConversationWebRequest } from "../host.ts";
 import { type ApiRequest, json, readChecked, readJson, send, SVG_CSP } from "./io.ts";
 
 /** A request to a module's route: `parts` is the path after `/api/x/`. */
@@ -53,33 +56,86 @@ export async function extensionRoute(
         method === "GET" || method === "DELETE"
             ? {}
             : await readJson<Record<string, unknown>>(request);
-    const stopped = new AbortController();
+    const source = route.conversation === undefined ? undefined : params[route.conversation];
 
-    // The browser went away before the answer: the handler may stop.
-    response.on("close", () => {
+    if (
+        source !== undefined &&
+        (!/^[1-9]\d*$/.test(source) || !Number.isSafeInteger(Number(source)))
+    ) {
+        throw new HttpError(400, "Bad source conversation id");
+    }
+
+    const id = source === undefined ? undefined : (Number(source) as unknown as ConversationId);
+    const scope = new ExtensionRequest(app, user.id, route.access, id);
+    const clientCancelled = new AbortController();
+
+    // Preserve the existing signal's disconnect-only lifetime, including while the answer is being sent.
+    response.once("close", () => {
         if (!response.writableFinished) {
-            stopped.abort();
+            clientCancelled.abort();
+            scope.close();
         }
     });
+
+    if (response.destroyed || request.aborted) {
+        clientCancelled.abort();
+        scope.close();
+    }
 
     let result: unknown;
 
     try {
-        result = await route.handle({
+        await app.harness.commit(
+            (tx) => scope.authorize(tx, id !== undefined && method !== "GET"),
+            scope.context,
+        );
+
+        const agent = id === undefined ? undefined : await app.agentState(id);
+
+        const current = scope.current();
+
+        if (id !== undefined) {
+            scope.bindSource(agent ?? {});
+        }
+
+        const bound =
+            id === undefined
+                ? {}
+                : {
+                      conversation: {
+                          id,
+                          title: app.sessionMeta(id)!.title ?? "New session",
+                          cwd: agent?.cwd ?? app.cwdOf(id),
+                          ...(agent?.model === undefined
+                              ? {}
+                              : { model: structuredClone(agent.model) }),
+                          thinkingLevel: agent?.thinkingLevel ?? "off",
+                      },
+                      linkedSessions: app.linkedSessions.forRequest(id, scope),
+                  };
+        const input = {
             method: route.method,
             params,
             query: url.searchParams,
             body,
-            user: { id: user.id, name: user.name, role: user.role },
-            signal: stopped.signal,
-        });
+            user: { id: current.id, name: current.name, role: current.role },
+            signal: clientCancelled.signal,
+            context: scope.context,
+            snapshot: scope.snapshot,
+            commit: scope.commit,
+            ...bound,
+        };
+
+        result = await route.handle(input as ConversationWebRequest);
     } catch (error) {
         // The browser went away: nobody waits for an answer, and the handler stopping is no failure.
-        if (stopped.signal.aborted) {
+        if (clientCancelled.signal.aborted) {
             return;
         }
 
         return failed(response, error, part.file, user);
+    } finally {
+        scope.close();
     }
 
     let text: string | undefined;
@@ -99,13 +155,13 @@ export async function extensionRoute(
 }
 
 /**
- * Answer with what a handler threw: an error made with `web.error`, as it is; anything else, a 500 whose words only the
- * owner gets. A library's error can carry a `status` and words not meant for everyone (a provider's 401 that quotes a
- * key): only `web.error` says they are. A 500 is logged here, with the extension's own stack, and answered here, so the
+ * Answer with what a handler threw: `web.error` or a core request API's HttpError, as it is; anything else, a 500 whose
+ * words only the owner gets. A library's error can carry a `status` and words not meant for everyone (a provider's 401 that quotes a
+ * key): only `web.error` or a core HttpError says they are. A 500 is logged here, with the extension's own stack, and answered here, so the
  * HTTP layer does not log it again.
  */
 function failed(response: ServerResponse, error: unknown, file: string, user: User): void {
-    const exposed = exposedError(error);
+    const exposed = error instanceof HttpError ? error : exposedError(error);
 
     if (exposed !== undefined) {
         if (exposed.status >= 500) {

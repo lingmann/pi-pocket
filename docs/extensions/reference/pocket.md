@@ -38,6 +38,16 @@ Since 0.14.0 · Stable
 
 The version of the extension API. It is the same number as `web.api` on the server.
 
+### `pocketVersion`
+
+```ts
+readonly pocketVersion: string | undefined;
+```
+
+Since 0.16.0 · Stable
+
+The connected server's package version, from its server metadata. It can be `undefined` when a new browser connects to a server older than 0.16.0. It is not `pocket.version`, which remains the extension API level. This read-only value does not check for updates.
+
 ### `module`
 
 ```ts
@@ -237,6 +247,16 @@ conversationId(): number | null;
 Since 0.14.0 · Stable
 
 The id of the session that this tab shows, a number as in its address (`/s/12`), or `null` when it shows none.
+
+### `openConversation`
+
+```ts
+openConversation(id: number | string): void;
+```
+
+Since 0.16.0 · Stable
+
+Open a positive integer conversation id through normal app navigation. This closes the extension page and keeps normal Back behavior. Sheets close when changing conversations; call `pocket.closeSheet()` first to close your own sheet even when that conversation is already open. The server still checks access; an id grants no access. Invalid ids throw. Use a bound start's `session` or a human list item's `conversationId`, not a private app URL.
 
 ## Routes and events
 

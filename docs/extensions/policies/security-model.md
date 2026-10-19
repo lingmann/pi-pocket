@@ -58,8 +58,12 @@ People who were invited to one session never reach a module's routes or its brow
   _Reason:_ a viewer must not be able to act.
 - **S3.2. Give routes with paths that overlap the same `access`, or check `user.role` in the handler.**\
   _Reason:_ when a person cannot use one route, another route with a matching path can answer them (`items/:id` for `items/new`).
-- **S3.3. Check each `:name` part before you make a file path with it.** The server refuses `..`, `\`, and NUL, but nothing else.\
-  _Reason:_ a path part is text from outside.
+    - **S3.3. Check each `:name` part before you make a file path with it.** The server refuses `..`, `\`, and NUL, but nothing else.\
+      _Reason:_ a path part is text from outside.
+
+Since 0.16.0, request document commits also reject viewers and expire on disconnect or handler return. These capabilities are for the module's own documents, not core state. An ordinary catalog save does not require a source turn or spend allowance. A `web.conversationRoute` adds actual-source authorization before the handler: GET needs seeing, mutations need steering and the turn. It does not bypass ordinary route `access` or permit single-session invitees.
+
+Bound linked starts act as the clicking person, never the source's last requester, and a receipt cannot be replayed as another person. They recheck source and target policy before initial-message admission. Source folder/model/thinking changes or conflicting target settings are rejected. The admission boundary is the start of Durable's submission transaction; later cancellation does not undo admitted work. Keep human list `conversationId` values in the UI, not a shared model transcript. `pocket.openConversation` uses normal server-authorized navigation; it grants no access. `host.modelInfo` exposes only local metadata for an exact pair, never sign-in data or a new model list.
 
 ## S4. Who runs commands
 
