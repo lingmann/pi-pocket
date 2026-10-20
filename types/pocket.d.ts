@@ -14,7 +14,7 @@
  * fails when this file and Pi Pocket's code do not agree.
  */
 import type { Context } from "@earendil-works/chord";
-import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { Skill } from "@earendil-works/pi-coding-agent";
 import type {
     ConversationId,
@@ -149,6 +149,15 @@ export interface Host {
      * @since 0.13.1
      */
     modelProblem(ref: ModelRef, fresh?: boolean): Promise<string | undefined>;
+    /**
+     * Shapes the request every model call sends: `shape` returns a replacement payload, or undefined to keep it. It runs
+     * after Pi and the caller shaped the request, closest to the wire. The return value stops the shaping.
+     * @since 0.18.0
+     * @experimental
+     */
+    shapeModelRequests(
+        shape: (payload: unknown, model: Model<Api>) => unknown | undefined,
+    ): () => void;
     /**
      * The id of the person that Pi works for in a session now: the person whose message started its current work.
      * @since 0.3.0
