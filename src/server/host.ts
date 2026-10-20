@@ -1,7 +1,7 @@
 import type { Context } from "@earendil-works/chord";
 import { awaitWithContext } from "@earendil-works/chord/context";
 import type { Skill } from "@earendil-works/pi-coding-agent";
-import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type {
     ConversationId,
     DocumentReader,
@@ -199,6 +199,12 @@ export interface ExtensionCommand {
 /** What browsers know about a command: no handler, and no file. The id changes with each version of its module. */
 export type CommandInfo = Omit<ExtensionCommand, "handler"> & { id: string; name: string };
 
+/**
+ * Shapes one model request: the payload Pi built and the model. Returns a replacement payload, or undefined to keep
+ * it.
+ */
+export type ModelRequestShaper = (payload: unknown, model: Model<Api>) => unknown | undefined;
+
 /** What the app gives its extensions. Extensions are reloaded on edit; the host is not. */
 export interface PocketHost {
     readonly guard: LancetGuard;
@@ -230,6 +236,12 @@ export interface PocketHost {
      * sign-in expired), or undefined when it may. `fresh` asks the provider's sign-in again first.
      */
     modelProblem(ref: ModelRef, fresh?: boolean): Promise<string | undefined>;
+    /**
+     * Shape the request every model call sends: `shape` returns a replacement payload, or undefined to keep it. It runs
+     * after Pi and the caller shaped the request, closest to the wire. Returns how to stop shaping. Only the modules
+     * the owner turned on shape requests.
+     */
+    shapeModelRequests(shape: ModelRequestShaper): () => void;
     /** Who Pi works for in a conversation now: whose message led to its current work. */
     requesterOf(conversationId: ConversationId): string | undefined;
     /** Source of the active run's latest input; undefined outside a main session. Queued inputs do not count. */
