@@ -56,12 +56,16 @@ async function fixture(t: TestContext) {
     writeFileSync(file, body);
     const save = (value: unknown = manifest) =>
         writeFileSync(join(root, "vendor", "victor", "manifest.json"), JSON.stringify(value));
-    const server = createServer((req, res) => {
+    const server = createServer(async (req, res) => {
         try {
             if (req.url === "/") {
                 serveApp(res);
-            } else if (req.url === "/victor-worker.js") {
-                serveFile(res, join(WEB, "victor-worker.js"));
+            } else if (
+                req.url === "/victor-worker.js" ||
+                req.url === "/victor-capture-worklet.js" ||
+                req.url === "/voice.js"
+            ) {
+                await serveFile(req, res, join(WEB, req.url));
             } else {
                 handler(req, res, req.url!);
             }
@@ -134,6 +138,82 @@ test("missing and malformed optional manifest leave app available and retry afte
     assert.equal((await f.request("/victor-assets/manifest.json")).status, 200);
     writeFileSync(join(f.root, "vendor", "victor", "manifest.json"), "broken again");
     assert.equal((await f.request("/victor-assets/manifest.json")).status, 200);
+});
+
+test("manifest GET and HEAD keep their exact byte length regardless of compression negotiation", async (t) => {
+    const f = await fixture(t);
+
+    f.save();
+    const bytes = Buffer.byteLength(JSON.stringify(f.manifest));
+
+    for (const encoding of ["identity", "gzip", "br"]) {
+        for (const method of ["GET", "HEAD"]) {
+            const response = await f.request("/victor-assets/manifest.json", {
+                method,
+                headers: { "accept-encoding": encoding },
+            });
+
+            assert.equal(response.status, 200);
+            assert.equal(response.headers.get("content-encoding"), null);
+            assert.equal(response.headers.get("content-length"), String(bytes));
+            assert.equal(response.headers.get("cache-control"), "no-cache");
+            assert.equal(response.headers.get("content-type"), "application/json");
+
+            if (method === "HEAD") {
+                assert.equal(await response.text(), "");
+            } else {
+                assert.deepEqual(await response.json(), f.manifest);
+            }
+        }
+    }
+});
+
+test("compressed and revalidated worker scripts keep their dedicated security policies", async (t) => {
+    const f = await fixture(t);
+
+    for (const file of ["victor-worker.js", "victor-capture-worklet.js", "voice.js"]) {
+        const expected = readFileSync(join(WEB, file), "utf8");
+
+        for (const encoding of ["identity", "gzip", "br"]) {
+            const response = await f.request(`/${file}`, {
+                headers: { "accept-encoding": encoding },
+            });
+
+            assert.equal(response.status, 200);
+            assert.equal(await response.text(), expected);
+            assert.equal(response.headers.get("cache-control"), "no-cache");
+            assert.equal(
+                response.headers.get("content-encoding"),
+                encoding === "identity" ? null : encoding,
+            );
+            const etag = response.headers.get("etag");
+
+            assert.ok(etag);
+            const cached = await f.request(`/${file}`, {
+                headers: { "accept-encoding": encoding, "if-none-match": etag },
+            });
+
+            assert.equal(cached.status, 304);
+            assert.equal(await cached.text(), "");
+
+            for (const result of [response, cached]) {
+                if (file === "voice.js") {
+                    assert.equal(result.headers.get("content-security-policy"), null);
+                    assert.equal(result.headers.get("cross-origin-resource-policy"), null);
+                } else {
+                    assert.match(
+                        result.headers.get("content-security-policy")!,
+                        /worker-src 'none'/,
+                    );
+                    assert.match(
+                        result.headers.get("content-security-policy")!,
+                        /'wasm-unsafe-eval'/,
+                    );
+                    assert.equal(result.headers.get("cross-origin-resource-policy"), "same-origin");
+                }
+            }
+        }
+    }
 });
 
 test("invalid layouts and asset fields fail closed and can be repaired", async (t) => {
