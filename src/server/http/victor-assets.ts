@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { APP_ROOT } from "../config.ts";
 import { HttpError } from "../errors.ts";
+import { send } from "./io.ts";
 
 type VictorFile = { file: string; bytes: number; sha256: string; contentType: string };
 type VictorBundle = { manifest: string; files: Map<string, VictorFile> };
@@ -224,13 +225,10 @@ export function createVictorAssetHandler(root: string = APP_ROOT) {
         const { manifest, files } = bundle;
 
         if (path === "/victor-assets/manifest.json") {
-            // Keep one uncompressed representation so GET and HEAD advertise the same exact byte length.
-            response.writeHead(200, {
-                "content-type": "application/json",
+            // Give HEAD the same representation as GET; Node suppresses its body. Let send own compression and framing.
+            send(response, 200, manifest, "application/json", {
                 "cache-control": "no-cache",
-                "content-length": String(Buffer.byteLength(manifest)),
             });
-            response.end(request.method === "HEAD" ? undefined : manifest);
 
             return;
         }

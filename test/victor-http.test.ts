@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createServer, get } from "node:http";
+import { createServer, get, type IncomingHttpHeaders } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
+import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { HttpError } from "../src/server/errors.ts";
 import { serveApp, serveFile, WEB } from "../src/server/http/assets.ts";
 import { createVictorAssetHandler } from "../src/server/http/victor-assets.ts";
@@ -140,30 +141,84 @@ test("missing and malformed optional manifest leave app available and retry afte
     assert.equal((await f.request("/victor-assets/manifest.json")).status, 200);
 });
 
-test("manifest GET and HEAD keep their exact byte length regardless of compression negotiation", async (t) => {
+/** Compare Content-Length with encoded wire bytes, not fetch's automatically decoded body. */
+function wireRequest(url: string, method: string, accept?: string) {
+    return new Promise<{ status: number | undefined; headers: IncomingHttpHeaders; body: Buffer }>(
+        (resolve, reject) => {
+            get(
+                url,
+                {
+                    method,
+                    headers: accept === undefined ? {} : { "accept-encoding": accept },
+                    signal: AbortSignal.timeout(5000),
+                },
+                (response) => {
+                    const chunks: Buffer[] = [];
+
+                    response.on("data", (chunk: Buffer) => chunks.push(chunk));
+                    response.on("error", reject);
+                    response.on("end", () =>
+                        resolve({
+                            status: response.statusCode,
+                            headers: response.headers,
+                            body: Buffer.concat(chunks),
+                        }),
+                    );
+                },
+            ).on("error", reject);
+        },
+    );
+}
+
+test("manifest GET negotiates compression and HEAD describes the same representation without a body", async (t) => {
     const f = await fixture(t);
 
     f.save();
-    const bytes = Buffer.byteLength(JSON.stringify(f.manifest));
+    const plain = Buffer.from(JSON.stringify(f.manifest));
+    const url = f.base + "/victor-assets/manifest.json";
 
-    for (const encoding of ["identity", "gzip", "br"]) {
-        for (const method of ["GET", "HEAD"]) {
-            const response = await f.request("/victor-assets/manifest.json", {
-                method,
-                headers: { "accept-encoding": encoding },
-            });
+    for (const [accept, encoding] of [
+        [undefined, undefined],
+        ["identity", undefined],
+        ["gzip", "gzip"],
+        ["br", "br"],
+        ["gzip, br", "br"],
+        ["gzip;q=0, br;q=0", undefined],
+    ] as const) {
+        const response = await wireRequest(url, "GET", accept);
+        const head = await wireRequest(url, "HEAD", accept);
 
-            assert.equal(response.status, 200);
-            assert.equal(response.headers.get("content-encoding"), null);
-            assert.equal(response.headers.get("content-length"), String(bytes));
-            assert.equal(response.headers.get("cache-control"), "no-cache");
-            assert.equal(response.headers.get("content-type"), "application/json");
+        for (const result of [response, head]) {
+            assert.equal(result.status, 200);
+            assert.equal(result.headers["content-encoding"], encoding);
+            assert.equal(result.headers["cache-control"], "no-cache");
+            assert.equal(result.headers["content-type"], "application/json");
+            assert.equal(result.headers["cross-origin-resource-policy"], "same-origin");
 
-            if (method === "HEAD") {
-                assert.equal(await response.text(), "");
-            } else {
-                assert.deepEqual(await response.json(), f.manifest);
+            // A length may be omitted. If present, it describes wire bytes, not decoded JSON.
+            if (result.headers["content-length"] !== undefined) {
+                assert.equal(Number(result.headers["content-length"]), response.body.length);
             }
+
+            if (encoding !== undefined) {
+                assert.match(result.headers.vary!, /\baccept-encoding\b/i);
+            }
+        }
+
+        assert.equal(head.body.length, 0);
+        assert.equal(head.headers.vary, response.headers.vary);
+        const decoded =
+            encoding === "br"
+                ? brotliDecompressSync(response.body)
+                : encoding === "gzip"
+                  ? gunzipSync(response.body)
+                  : response.body;
+
+        assert.deepEqual(decoded, plain);
+        assert.deepEqual(JSON.parse(decoded.toString("utf8")), f.manifest);
+
+        if (encoding !== undefined) {
+            assert.ok(response.body.length < plain.length);
         }
     }
 });
@@ -365,10 +420,6 @@ test("manifest and streamed assets preserve headers, HEAD, ETags, errors and dis
 
     assert.equal(manifest.status, 200);
     assert.equal(manifest.headers.get("cache-control"), "no-cache");
-    assert.equal(
-        manifest.headers.get("content-length"),
-        String(Buffer.byteLength(JSON.stringify(f.manifest))),
-    );
     assert.equal(await manifest.text(), "");
     const response = await f.request(path);
 
