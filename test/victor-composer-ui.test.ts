@@ -643,6 +643,60 @@ test(
     },
 );
 
+test("reordered composer slots preserve Victor ownership and its stop control", real, async () => {
+    await fresh();
+    await run(`(await import('/theme.js')).setPrefs({ layout: { composer: {
+        order: ['core:attach', 'core:plan', 'core:model', 'core:places'],
+        hidden: { 'core:model': true, 'core:plan': true }
+    } } })`);
+
+    try {
+        await type("Typed");
+        await activate("spoken");
+        assert.equal(await value(`document.querySelector('.attach-button').disabled`), true);
+        assert.equal(await value(`document.querySelector('input[type="file"]').disabled`), true);
+        assert.equal(await value(`document.querySelector('.model-chip') === null`), true);
+        await run(`document.querySelector('.victor-toggle').click()`);
+        await phase("off");
+        await see(`document.querySelector('.composer textarea').value === 'Typed spoken'`);
+        assert.equal(await value(`document.querySelector('.attach-button').disabled`), false);
+    } finally {
+        await run(`victor.disable(); (await import('/theme.js')).setPrefs({ layout: {} })`);
+    }
+});
+
+test("Victor waiting layouts keep Interrupt separate from voice sends", real, async () => {
+    for (const width of [320, 350, 390, 1280]) {
+        await page.setViewport({ width, height: 844, scale: 1, mobile: width < 600 });
+        await fresh();
+        await activate("");
+        await beginVoiceSubmit();
+        await run(
+            `pocket.store.set({ view: { ...pocket.store.state.view, live: { busy: true } } })`,
+        );
+        await see(`document.querySelectorAll('.mode-switch button').length === 3`);
+        await run(`document.querySelector('.mode-switch .interrupt').click()`);
+        assert.equal(await value("voicePosts[0].mode"), "followUp");
+        assert.equal(await value(`document.querySelector('.send-button').disabled`), true);
+        await endVoiceSubmit(200);
+        await phase("waiting");
+        const measured = await layout();
+
+        fits(measured, width, "waiting for reply");
+        assert.equal(measured.chip, false);
+        assert.equal(measured.readonly, true);
+        assert.equal(await value(`document.querySelector('.send-button').disabled`), true);
+        assert.equal(
+            await value(`document.querySelector('.stop-button').getBoundingClientRect().width > 0`),
+            true,
+        );
+        await run(
+            `victor.disable(); pocket.store.set({ view: { ...pocket.store.state.view, live: { busy: false } } })`,
+        );
+        await phase("off");
+    }
+});
+
 test(
     "Victor follows themes, density and text size without borrowing Plan styles",
     real,
