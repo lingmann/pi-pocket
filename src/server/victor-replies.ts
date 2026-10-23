@@ -1,6 +1,6 @@
 /** Durable input attribution for Victor's per-run reply style; no browser-global voice state. */
 import type { Context } from "@earendil-works/chord";
-import { type ConversationId, LiveDoc } from "@earendil-works/pi-durable";
+import { type ConversationId, LiveDoc, type Tx } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import { InputSourceDoc, type InputSource } from "./docs.ts";
 
@@ -24,6 +24,26 @@ export async function recordInputSource(
 
         recorded.source ??= source;
     }, context);
+}
+
+/** Copy sources before a queued Interrupt task can admit its replacement requests, in the task's creation commit. */
+export async function copyInputSources(
+    tx: Tx,
+    id: ConversationId,
+    requests: readonly { from: string | undefined; to: string }[],
+): Promise<void> {
+    for (const { from, to } of requests) {
+        // Preserve an admitted request's source, including legacy requests with no source record.
+        if ((await tx.submissionByRequest(id, to)) !== undefined) {
+            continue;
+        }
+
+        const original =
+            from === undefined ? undefined : await tx.doc(InputSourceDoc, id, from, null);
+        const replacement = await tx.doc(InputSourceDoc, id, to, null);
+
+        replacement.source ??= original?.source ?? "text";
+    }
 }
 
 /** The latest input actually placed in this run wins; queued follow-ups cannot change an answer in progress. */

@@ -9,6 +9,7 @@
 export function createVictorComposer({ mode, notify, readDraft, expandDraft, writeDraft }) {
     const listeners = new Set();
     let owner = null;
+    let handoff = 0;
 
     const save = (id, value) => {
         writeDraft(id, value);
@@ -19,6 +20,13 @@ export function createVictorComposer({ mode, notify, readDraft, expandDraft, wri
     };
 
     return {
+        /** A delayed editor loses permission after any Victor handoff, even if Victor has since stopped. */
+        editGuard() {
+            const captured = handoff;
+
+            return () => !mode.active && captured === handoff;
+        },
+
         /** Subscribe a mounted composer; late restoration reaches its replacement, not stale UI. */
         mount(id, changed) {
             const listener = (conversationId, value) => {
@@ -61,6 +69,8 @@ export function createVictorComposer({ mode, notify, readDraft, expandDraft, wri
 
                 return;
             }
+
+            handoff++;
 
             const { text, initialText } = takeDraft();
             let ownedDraft = text;

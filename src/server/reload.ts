@@ -57,6 +57,7 @@ const ORDER = [
     "pip.ts",
     "triggers.ts",
     "gallery.ts",
+    "session-tags.ts",
     "victor-reply-style.ts",
 ];
 
@@ -67,7 +68,12 @@ export const BUILT_IN_MODULES: ReadonlySet<string> = new Set(
 /** Modules the app cannot work without: always on. */
 const REQUIRED = new Set(["prompt.ts"]);
 /** Built-in modules that stay off until the owner turns them on. Drop-ins all do. */
-const OFF_BY_DEFAULT = new Set(["guard.ts", "agent-teams.ts", "anthropic-subscription.ts"]);
+const OFF_BY_DEFAULT = new Set([
+    "guard.ts",
+    "agent-teams.ts",
+    "anthropic-subscription.ts",
+    "session-tags.ts",
+]);
 const TITLES: Record<string, string> = {
     "prompt.ts": "System prompt",
     "artifacts.ts": "Artifacts",
@@ -85,6 +91,7 @@ const TITLES: Record<string, string> = {
     "triggers.ts": "Triggers",
     "victor-reply-style.ts": "Victor reply style",
     "gallery.ts": "Extension gallery",
+    "session-tags.ts": "Session tags",
 };
 
 /**
@@ -101,6 +108,7 @@ export const BUILT_IN_TOOLS: ReadonlySet<string> = new Set([
     "edit",
     "bash",
     "artifact",
+    "artifact_inline",
     "browser",
     "subagent",
     "team",

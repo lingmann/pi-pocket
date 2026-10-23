@@ -16,6 +16,7 @@ import {
     scoped,
     store,
 } from "../store.js";
+import { sessionStarted } from "../extension-ui.js";
 import { APPLE, html, Icon, Sheet, shortPath } from "../ui.js";
 import { piSessionsAvailable } from "./pi-sessions.js";
 
@@ -117,7 +118,7 @@ function LineInput({ value, placeholder, label, onSubmit, onCancel, class: class
     </form>`;
 }
 
-export function CwdSheet({ mode }) {
+export function CwdSheet({ mode, fromList = false }) {
     const { view, server, folderFavorites: favorites } = store.state;
     const changing = mode === "change";
     // Where it opens: the folder of the session you are in (New session here), else the server's own. Issue #96.
@@ -250,6 +251,11 @@ export function CwdSheet({ mode }) {
                 const created = await actions.createSession(path, { worktree });
 
                 navigate(created.id);
+
+                // New in the session list: extensions' filters that are on can make it meet them.
+                if (fromList) {
+                    sessionStarted(created.id);
+                }
             }
         } catch (error) {
             notify("error", error.message);

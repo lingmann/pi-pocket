@@ -1,7 +1,7 @@
 // Real Composer and Victor controller in an isolated app. Only browser speech resources are fake;
 // these checks say nothing about recognition accuracy or physical audio routing.
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -11,7 +11,7 @@ import { findBrowser } from "../src/server/browser/discovery.ts";
 import type { BrowserPage } from "../src/server/browser/page.ts";
 import { VIEWPORTS } from "../src/server/browser/viewport.ts";
 import { createHandler } from "../src/server/http.ts";
-import { type App, cleanUp, newSession, openApp, root, until, work } from "./helpers.ts";
+import { type App, cleanUp, newSession, openApp, owner, root, until, work } from "./helpers.ts";
 
 const chromium = findBrowser();
 const real = { skip: chromium === undefined ? "no Chromium-based browser" : false };
@@ -35,7 +35,30 @@ before(async () => {
     }
 
     writeFileSync(join(work, "victor-draft-fixture.txt"), "File mention fixture");
+    const extensions = join(root, "data", "extensions");
+
+    mkdirSync(extensions, { recursive: true });
+    writeFileSync(
+        join(extensions, "victor-keys.ts"),
+        `/** Test composer keys. */
+        export default (_host, web) => web.client("victor-keys.js", { access: "view" });
+    `,
+    );
+    writeFileSync(
+        join(extensions, "victor-keys.js"),
+        `export default pocket => {
+        pocket.composerKey({ id: "edit", keys: "Ctrl+W", label: "Edit draft", run(box) {
+            window.keyCalls = (window.keyCalls ?? 0) + 1;
+            box.set("Shortcut draft");
+        } });
+        pocket.composerKey({ id: "late", keys: "Ctrl+E", label: "Delayed edit", run(box) {
+            return new Promise(resolve => { window.finishKey = () => { box.set("Late draft"); resolve(); }; });
+        } });
+        window.victorKeysLoaded = true;
+    };`,
+    );
     app = await openApp(fauxProvider());
+    await app.setExtensionEnabled(owner(app), "victor-keys.ts", true);
     first = await newSession(app);
     second = await newSession(app);
     server = createServer(
@@ -246,6 +269,58 @@ test(
         );
     },
 );
+
+test("extension keys edit ordinary drafts but cannot write into Victor's draft", real, async () => {
+    await fresh();
+    await see("window.victorKeysLoaded === true");
+    const key = (key: string) =>
+        run(`document.querySelector('.composer textarea').dispatchEvent(
+        new KeyboardEvent('keydown', { key: ${JSON.stringify(key)}, ctrlKey: true, bubbles: true, cancelable: true })
+    )`);
+
+    await type("Typed");
+    await key("w");
+    await see(`document.querySelector('.composer textarea').value === 'Shortcut draft'`);
+    assert.equal(await value(`pocket.drafts.get(${JSON.stringify(first)})`), "Shortcut draft");
+    await key("e");
+    await see("typeof window.finishKey === 'function'");
+    await activate("spoken");
+    await key("w");
+    await run("finishKey()");
+    assert.equal(await value("window.keyCalls"), 1, "Victor blocks extension key dispatch");
+    assert.equal(await value(`pocket.drafts.get(${JSON.stringify(first)})`), "Shortcut draft");
+    await run("victor.disable()");
+    await phase("off");
+    await see(`document.querySelector('.composer textarea').value === 'Shortcut draft spoken'`);
+    await key("w");
+    await see(`document.querySelector('.composer textarea').value === 'Shortcut draft'`);
+    assert.equal(await value("window.keyCalls"), 2, "keys resume after Victor releases the draft");
+    await key("e");
+    await activate("more speech", 2);
+    await run("victor.disable()");
+    await phase("off");
+    await run("finishKey()");
+    await see(
+        `document.querySelector('.composer textarea').value === 'Shortcut draft more speech'`,
+    );
+    assert.equal(
+        await value(`pocket.drafts.get(${JSON.stringify(first)})`),
+        "Shortcut draft more speech",
+    );
+
+    await key("e");
+    await type("Newer typing");
+    await run("finishKey()");
+    assert.equal(await value(`pocket.drafts.get(${JSON.stringify(first)})`), "Newer typing");
+
+    await key("e");
+    await run(`pocket.navigate(${JSON.stringify(second)})`);
+    await see(`pocket.store.state.view.conversation?.id === ${JSON.stringify(second)}`);
+    await run(`pocket.navigate(${JSON.stringify(first)})`);
+    await see(`pocket.store.state.view.conversation?.id === ${JSON.stringify(first)}`);
+    await run("finishKey()");
+    await see(`document.querySelector('.composer textarea').value === 'Newer typing'`);
+});
 
 test(
     "navigation saves the typed and spoken draft to the captured conversation, never its replacement",
@@ -704,6 +779,8 @@ test(
         for (const [width, look, theme, density, text] of [
             [320, "pocket", "tokyo-night", "comfortable", 15],
             [390, "pocket", "flexoki-light", "tight", 17],
+            [320, "pocket", "tokyo-night", "comfortable", 32],
+            [390, "pocket", "flexoki-light", "tight", 10],
             [1280, "lantern", "lantern", "compact", 13],
         ] as const) {
             await page.setViewport({ width, height: 844, scale: 1, mobile: width < 600 });
