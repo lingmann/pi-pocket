@@ -47,6 +47,7 @@ export function describeCall(call) {
         case "bash":
             return { icon: ">_", label: "", subject: short(args.command, 140), mono: true };
         case "artifact":
+        case "artifact_inline":
             return {
                 icon: "✦",
                 label: "Artifact",

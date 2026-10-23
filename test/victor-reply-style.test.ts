@@ -34,7 +34,11 @@ import createVictorReplyStyle from "../src/server/extensions/victor-reply-style.
 import type { ExtensionWeb, PocketHost } from "../src/server/host.ts";
 import { createHandler } from "../src/server/http.ts";
 import { ownRequest } from "../src/server/requests.ts";
-import { recordInputSource, victorReplyMode } from "../src/server/victor-replies.ts";
+import {
+    copyInputSources,
+    recordInputSource,
+    victorReplyMode,
+} from "../src/server/victor-replies.ts";
 
 const input = {
     conversationId: 1 as ConversationId,
@@ -306,6 +310,173 @@ for (const initial of ["victor", undefined] as const) {
         (initial ? assertVoice : assertText)(seen[2]!);
     });
 }
+
+for (const source of ["victor", undefined] as const) {
+    test(`queued Interrupt preserves ${source ?? "text"} style and the retained messages' sources`, async (t) => {
+        const seen: Seen[] = [];
+        const { app, id } = await fixture(t, (request) => {
+            seen.push(observe(request));
+
+            return seen.length === 1
+                ? fauxAssistantMessage([fauxText("word ".repeat(8000))])
+                : answer();
+        });
+
+        await submit(app, id, { text: "Initial run" });
+        await until(() => seen.length === 1, "the streaming request");
+        const moved = await submit(app, id, { source, text: "Moved message" });
+        const voice = await submit(app, id, { source: "victor", text: "Retained voice" });
+        const typed = await submit(app, id, { text: "Retained text" });
+
+        await app.commands.moveQueued(id, owner(app), Number(moved.submissionId), "interrupt");
+        await until(() => seen.length === 4 && !app.isBusy(id), "all replacement replies");
+        assert.deepEqual(
+            seen.map((each) => each.text),
+            ["Initial run", "Moved message", "Retained voice", "Retained text"],
+        );
+        (source === "victor" ? assertVoice : assertText)(seen[1]!);
+        assertVoice(seen[2]!);
+        assertText(seen[3]!);
+
+        for (const [requestId, expected] of [
+            [ownRequest(owner(app).id, `interrupt-${moved.submissionId}`), source ?? "text"],
+            [`${voice.requestId}~${moved.submissionId}`, "victor"],
+            [`${typed.requestId}~${moved.submissionId}`, "text"],
+        ]) {
+            assert.equal(
+                (await app.harness.snapshot(InputSourceDoc, id, requestId!, context))?.source,
+                expected,
+            );
+        }
+    });
+}
+
+test("replacement sources survive restart, repeated requeue, legacy inputs, and conflicting retries", async (t) => {
+    const seen: Seen[] = [];
+    const { app, id, model, data } = await fixture(t, (request) => {
+        seen.push(observe(request));
+
+        return answer();
+    });
+    const request = (key: string) => ownRequest(owner(app).id, key);
+    const voice = request("voice");
+    const replacement = `${voice}~1`;
+    const repeated = `${voice}~2`;
+    const pinned = request("pinned");
+    const legacy = request("legacy");
+    const conversation = await app.conversation(id);
+
+    await recordInputSource(app, id, voice, "victor", context);
+    await recordInputSource(app, id, pinned, "text", context);
+    const admitted = await conversation.submit(
+        { type: "input", content: "Legacy", requestId: legacy },
+        context,
+    );
+
+    await wait(app, admitted.id);
+    await assert.rejects(
+        app.harness.commit(async (tx) => {
+            await copyInputSources(tx, id, [{ from: voice, to: replacement }]);
+
+            throw new Error("task creation failed");
+        }, context),
+        /task creation failed/,
+    );
+    assert.equal(await app.harness.snapshot(InputSourceDoc, id, replacement, context), undefined);
+    await app.harness.commit(async (tx) => {
+        await copyInputSources(tx, id, [
+            { from: voice, to: replacement },
+            { from: replacement, to: repeated },
+            { from: voice, to: pinned },
+            { from: voice, to: legacy },
+            { from: legacy, to: `${legacy}~1` },
+            { from: undefined, to: request("unknown") },
+        ]);
+    }, context);
+    await app.close();
+    const reopened = await openApp(model, data);
+
+    t.after(() => reopened.close());
+    await reopened.harness.commit(
+        (tx) => copyInputSources(tx, id, [{ from: pinned, to: repeated }]),
+        context,
+    );
+    assert.equal(
+        (await reopened.harness.snapshot(InputSourceDoc, id, legacy, context))?.source,
+        undefined,
+    );
+
+    for (const [requestId, source] of [
+        [replacement, "victor"],
+        [repeated, "victor"],
+        [pinned, "text"],
+        [`${legacy}~1`, "text"],
+        [request("unknown"), "text"],
+    ]) {
+        assert.equal(
+            (await reopened.harness.snapshot(InputSourceDoc, id, requestId!, context))?.source,
+            source,
+        );
+        // Interrupt submits directly to Durable, without Commands reserving a source again.
+        const submission = await (
+            await reopened.conversation(id)
+        ).submit(
+            {
+                type: "input",
+                content: requestId!,
+                requestId: requestId!,
+            },
+            context,
+        );
+
+        await wait(reopened, submission.id);
+        (source === "victor" ? assertVoice : assertText)(seen.at(-1)!);
+    }
+});
+
+test("queued Interrupt keeps voice style when restarted during the replacement run", async (t) => {
+    const seen: Seen[] = [];
+    const { app, id, model, data } = await fixture(t, (request) => {
+        const current = observe(request);
+
+        seen.push(current);
+
+        if (current.text === "Initial") {
+            return fauxAssistantMessage([fauxText("word ".repeat(8000))]);
+        }
+
+        if (current.text === "Moved" && current.role === "user") {
+            return fauxAssistantMessage([fauxToolCall("bash", { command: "sleep 2" })], {
+                stopReason: "toolUse",
+            });
+        }
+
+        return answer();
+    });
+
+    await submit(app, id, { text: "Initial" });
+    await until(() => seen.length === 1, "the initial run");
+    const moved = await submit(app, id, { text: "Moved", source: "victor" });
+
+    await submit(app, id, { text: "Retained", source: "victor" });
+    await app.commands.moveQueued(id, owner(app), Number(moved.submissionId), "interrupt");
+    await until(
+        async () =>
+            (await app.harness.snapshot(LiveDoc, id, context))?.tools?.some(
+                (tool) => tool.status === "running",
+            ) === true,
+        "the replacement run's tool",
+    );
+    await app.close();
+    const reopened = await openApp(model, data);
+
+    t.after(() => reopened.close());
+    await until(
+        () => seen.some((each) => each.text === "Retained") && !reopened.isBusy(id),
+        "the restored queue's reply",
+    );
+    seen.slice(1).forEach(assertVoice);
+});
 
 test("source reservation precedes the final admission lease and survives a rejected admission", async (t) => {
     const seen: Seen[] = [];

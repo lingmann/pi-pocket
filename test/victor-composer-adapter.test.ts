@@ -32,10 +32,25 @@ const { createVictorComposer } = (await import(
     new URL("../web/victor-composer.js", import.meta.url).href
 )) as {
     createVictorComposer: (dependencies: Dependencies) => {
+        editGuard: () => () => boolean;
         mount: (id: string, changed: (text: string) => void) => () => void;
         toggle: (options: Toggle) => void;
     };
 };
+
+test("an editor guard expires at Victor handoff, not merely while Victor is active", () => {
+    const { adapter, toggle } = setup();
+    const edit = adapter.editGuard();
+
+    assert.equal(edit(), true);
+    toggle({ sending: true });
+    assert.equal(edit(), true, "a refused activation takes no ownership");
+    toggle();
+    assert.equal(edit(), false);
+    toggle();
+    assert.equal(edit(), false, "stopping Victor never revives a stale editor");
+    assert.equal(adapter.editGuard()(), true, "a new editor can use the restored draft");
+});
 
 function setup() {
     const saved = new Map([["first", "Typed"]]);
