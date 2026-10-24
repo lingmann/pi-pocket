@@ -1652,14 +1652,14 @@ export class Pip {
 
         // PiP turned off keeps its follows: a report waits until it is on again, as its schedules, watches, and hooks
         // do, so no run starts in its conversation without its rules and tools.
-        for (;;) {
-            const person = this.#app.config.userById(input.userId);
+        const person = this.#app.config.userById(input.userId);
 
-            if (person === undefined || this.available(person)) {
-                break;
-            }
-
-            await runtime.sleep(runtime.now() + this.holdMs, context);
+        if (person !== undefined && !this.available(person)) {
+            return runtime.sleepUntil(
+                runtime.now() + this.holdMs,
+                { phase: "report", text },
+                context,
+            );
         }
 
         const pip = await this.#app.harness.conversation(pipId, context);

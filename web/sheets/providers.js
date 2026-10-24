@@ -140,6 +140,46 @@ function SubagentModels({ names }) {
     </div>`;
 }
 
+/** How long a run waits for a provider's limit to clear (`limit-gate.ts`), at most. */
+const LIMIT_WAIT = [
+    [0, "Off"],
+    [1, "1 hour"],
+    [6, "6 hours"],
+    [12, "12 hours"],
+    [24, "24 hours"],
+];
+
+/** The owner's choice of how long a run waits for a limit, rather than failing. Shorter limits wait less. */
+function LimitWait() {
+    const hours = store.state.server?.limitWaitHours;
+
+    // A server that does not wait for limits sends none.
+    if (typeof hours !== "number") {
+        return null;
+    }
+
+    const change = (value) => attempt(() => api("settings", { limitWaitHours: value }));
+
+    return html`<div class="limit-wait">
+        <div class="small">Wait for a limit</div>
+        <p class="muted small">
+            When a provider's limit stops a run, it waits for the limit to clear, up to this long, and goes on by
+            itself. A limit that clears later makes it fail with the time.
+        </p>
+        <div class="segmented" role="group" aria-label="How long to wait for a limit">
+            ${LIMIT_WAIT.map(
+                ([value, label]) => html`<button
+                    class=${hours === value ? "on" : ""}
+                    aria-pressed=${hours === value}
+                    onClick=${() => change(value)}
+                >
+                    ${label}
+                </button>`,
+            )}
+        </div>
+    </div>`;
+}
+
 export function ProvidersSheet() {
     const { me, auth } = store.state;
     const [providers, setProviders] = useState(null);
@@ -258,6 +298,7 @@ export function ProvidersSheet() {
                 owner &&
                 html`<aside class="providers-side" aria-label="Models">
                     <${RefreshModels} />
+                    <${LimitWait} />
                     <${SubagentModels}
                         names=${Object.fromEntries(
                             (providers ?? []).map((each) => [each.id, each.name]),

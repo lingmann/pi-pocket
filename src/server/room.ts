@@ -58,6 +58,7 @@ import {
     type PeekLine,
     peekLines,
     projectEntry,
+    projectLimit,
     projectLive,
     projectStats,
     turnStart,
@@ -278,11 +279,14 @@ export function subagentView(
     record: SubagentRecord,
     busy: boolean,
     reporting: boolean,
+    limited?: number,
 ) {
     return {
         name,
         conversationId: record.conversationId,
         busy,
+        // Its request waits for its provider's limit to clear: when the next request goes out.
+        ...(limited === undefined ? {} : { limited }),
         ...(record.asked === undefined ? {} : { asked: record.asked }),
         ...(record.askedAt === undefined ? {} : { askedAt: record.askedAt }),
         ...(record.answeredAt === undefined ? {} : { answeredAt: record.answeredAt }),
@@ -315,7 +319,7 @@ export class Room {
     #head = "";
     readonly #projected = new Map<number, ClientEntry | null>();
     /** The live run as tabs get it, projected once for each state of it, not once for each tab. */
-    #live: { from: LiveState | undefined; projected: ClientLive } | undefined;
+    #live: { from: LiveState | undefined; limit: string; projected: ClientLive } | undefined;
     /** Each waiting message's text for the queue, and the subagents it reports from: what it says does not change. */
     readonly #queued = new Map<number, { text: string; reports: string[] | undefined }>();
     authors: Record<string, string> = {};
@@ -608,6 +612,7 @@ export class Room {
                     record,
                     this.#app.isBusy(record.conversationId),
                     this.#reporting.has(name),
+                    this.#app.limits.waitFor(Number(record.conversationId))?.until,
                 ),
             ),
             // Reports on their way that a spend limit holds back, and why: the subagents bar says so.
@@ -783,8 +788,19 @@ export class Room {
 
     /** The live run as tabs get it, projected once for each state of it. */
     #projectLive(live: LiveState | undefined): ClientLive {
-        if (this.#live === undefined || this.#live.from !== live) {
-            this.#live = { from: live, projected: projectLive(live) };
+        // The wait for a provider's limit is not in the run's documents: it comes from the app's limit gate.
+        const wait = this.#app.limits.waitFor(Number(this.id));
+        const limit = wait === undefined ? "" : JSON.stringify(wait);
+
+        if (this.#live === undefined || this.#live.from !== live || this.#live.limit !== limit) {
+            const projected = projectLive(live);
+
+            this.#live = {
+                from: live,
+                limit,
+                projected:
+                    wait === undefined ? projected : { ...projected, limit: projectLimit(wait) },
+            };
         }
 
         return this.#live.projected;

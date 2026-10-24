@@ -10,6 +10,7 @@ import {
 import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { test } from "node:test";
 import {
     encryptPayload,
@@ -19,6 +20,7 @@ import {
     vapidAuthorization,
     type PushKeys,
 } from "../src/server/push.ts";
+import { pushRoutes } from "../src/server/http/push-routes.ts";
 
 // RFC 8291 Section 5 and Appendix A.
 const RFC = {
@@ -287,4 +289,26 @@ test("PushStore persists, validates, and notify drops gone subscriptions", async
     // removeUser drops subscriptions.
     reopened.removeUser("u1");
     assert.equal(reopened.subscriptions("u1").length, 0);
+});
+
+test("every push kind, the limit wait too, can be turned off through the prefs route", async () => {
+    const store = new PushStore(mkdtempSync(join(tmpdir(), "push-prefs-")));
+    let answer = "";
+    const request = Object.assign(
+        Readable.from([Buffer.from(JSON.stringify({ limit: false, done: false }))]),
+        {
+            method: "POST",
+            headers: {},
+        },
+    );
+    const response = { writeHead: () => {}, end: (body: string) => (answer = body) };
+
+    await pushRoutes(
+        { app: { pushStore: store }, request, response, user: { id: "u" } } as never,
+        "prefs",
+    );
+    assert.deepEqual(
+        [JSON.parse(answer).prefs.limit, JSON.parse(answer).prefs.done, store.prefs("u").limit],
+        [false, false, false],
+    );
 });

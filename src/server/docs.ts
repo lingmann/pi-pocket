@@ -141,6 +141,7 @@ export type InputSource = "text" | "victor";
 export const InputSourceDoc = defineDocFamily<{ source?: InputSource }, null>({
     kind: "pocket.input-source",
     version: 1,
+    ...rebased,
     family: true,
     scope: "conversation",
     history: "latest",

@@ -127,25 +127,26 @@ Each is a `data-part` attribute. Some elements have two (`data-part="composer-bu
 
 ### The conversation
 
-| Part                                            | What                                                                                    |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `transcript`                                    | The column of turns                                                                     |
-| `prompt-row`                                    | The row a person's message stands in                                                    |
-| `prompt`                                        | A person's message                                                                      |
-| `prompt-head`, `author-mark`, `prompt-author`   | Its head: who sent it and when; their initials; their name                              |
-| `prompt-text`                                   | What it says (its skill chip, words, and files)                                         |
-| `reply`                                         | Pi's answer                                                                             |
-| `reply-actions`                                 | The row under an answer: react, discuss, pin, copy                                      |
-| `activity`, `activity-head`, `activity-chevron` | A group of what Pi did, its head (what it did, how long), and the chevron that opens it |
-| `timeline`                                      | The open group's steps, on a rule                                                       |
-| `timeline-earlier`                              | Above a long group's newest steps: shows the earlier ones                               |
-| `thinking`, `tool-call`                         | A step: a thought, a tool call                                                          |
-| `step-head`, `step-mark`, `step-label`          | A step's line, its mark on the rule, and its name                                       |
-| `step-detail`                                   | What a step shows under its line: what it made, and its input and output                |
-| `approval`                                      | A call that waits for someone to allow it                                               |
-| `live-line`, `live-mark`                        | The line that says what Pi does now, and its dot                                        |
-| `code-block`, `code-head`                       | A code block in a reply, and its bar (language, Copy)                                   |
-| `inline-code`                                   | Code in a line of words, in a reply                                                     |
+| Part                                            | What                                                                                                          |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `transcript`                                    | The column of turns                                                                                           |
+| `prompt-row`                                    | The row a person's message stands in                                                                          |
+| `prompt`                                        | A person's message                                                                                            |
+| `prompt-head`, `author-mark`, `prompt-author`   | Its head: who sent it and when; their initials; their name                                                    |
+| `prompt-text`                                   | What it says (its skill chip, words, and files)                                                               |
+| `reply`                                         | Pi's answer                                                                                                   |
+| `reply-actions`                                 | The row under an answer: react, discuss, pin, copy                                                            |
+| `activity`, `activity-head`, `activity-chevron` | A group of what Pi did, its head (what it did, how long), and the chevron that opens it                       |
+| `timeline`                                      | The open group's steps, on a rule                                                                             |
+| `timeline-earlier`                              | Above a long group's newest steps: shows the earlier ones                                                     |
+| `thinking`, `tool-call`                         | A step: a thought, a tool call                                                                                |
+| `step-head`, `step-mark`, `step-label`          | A step's line, its mark on the rule, and its name                                                             |
+| `step-detail`                                   | What a step shows under its line: what it made, and its input and output                                      |
+| `approval`                                      | A call that waits for someone to allow it                                                                     |
+| `live-line`, `live-mark`                        | The line that says what Pi does now, and its dot                                                              |
+| `live-limit`, `live-retry`                      | In that line while Pi waits for a provider's limit to clear: when it tries next, and Retry now (since 0.21.0) |
+| `code-block`, `code-head`                       | A code block in a reply, and its bar (language, Copy)                                                         |
+| `inline-code`                                   | Code in a line of words, in a reply                                                                           |
 
 ### The composer
 
@@ -193,21 +194,22 @@ Each is a `data-part` attribute. Some elements have two (`data-part="composer-bu
 
 ## States
 
-| Where                                              | Attribute                                        | Values                                                                                                                    |
-| -------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
-| `rail-button`                                      | `data-state`                                     | `open` while what it opens shows, `busy` while work it counts goes on; both, or none. Select with `~=`                    |
-| `session-row`                                      | `data-state`                                     | `working`, `waiting` (for you), `failed`, `done` (since you looked), `idle`                                               |
-| `session-button`                                   | `aria-current`                                   | `page` on the open session's                                                                                              |
-| `session-group-head`, `activity-head`, `step-head` | `aria-expanded`                                  | `true` while open                                                                                                         |
-| `activity`                                         | `data-state`                                     | `open` while open                                                                                                         |
-| `tool-call`                                        | `data-state`                                     | `running`, `ok`, `failed`, `waiting` (for approval), `denied`, `stopped`                                                  |
-| `prompt`                                           | `data-from`                                      | `me`, `person` (someone else), `linked` (a linked session), `other` (Pi's schedule, the main agent, a watch or a webhook) |
-| `send-button`                                      | `data-state`                                     | `ready` when there is something to send                                                                                   |
-| `sheet`                                            | `data-sheet`, `data-size`                        | The sheet's type; `wide` for a wide one                                                                                   |
-| `sheet`, `launcher`, `drawer`                      | `data-state`                                     | `closing` while it goes                                                                                                   |
-| `scrim`                                            | `data-for`                                       | `sheet`, `launcher`, `drawer`                                                                                             |
-| `launcher-row`                                     | `aria-selected`                                  | `true` on the one Enter opens                                                                                             |
-| Other buttons and tabs                             | `aria-pressed`, `aria-expanded`, `aria-selected` | As accessibility needs them                                                                                               |
+| Where                                              | Attribute                                        | Values                                                                                                                                         |
+| -------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rail-button`                                      | `data-state`                                     | `open` while what it opens shows, `busy` while work it counts goes on; both, or none. Select with `~=`                                         |
+| `session-row`                                      | `data-state`                                     | `working`, `waiting` (for you), `limited` (waiting for a provider's limit to clear, since 0.21.0), `failed`, `done` (since you looked), `idle` |
+| `peek-tile`                                        | `data-state`                                     | The same as `session-row`'s, but without `failed`                                                                                              |
+| `session-button`                                   | `aria-current`                                   | `page` on the open session's                                                                                                                   |
+| `session-group-head`, `activity-head`, `step-head` | `aria-expanded`                                  | `true` while open                                                                                                                              |
+| `activity`                                         | `data-state`                                     | `open` while open                                                                                                                              |
+| `tool-call`                                        | `data-state`                                     | `running`, `ok`, `failed`, `waiting` (for approval), `denied`, `stopped`                                                                       |
+| `prompt`                                           | `data-from`                                      | `me`, `person` (someone else), `linked` (a linked session), `other` (Pi's schedule, the main agent, a watch or a webhook)                      |
+| `send-button`                                      | `data-state`                                     | `ready` when there is something to send                                                                                                        |
+| `sheet`                                            | `data-sheet`, `data-size`                        | The sheet's type; `wide` for a wide one                                                                                                        |
+| `sheet`, `launcher`, `drawer`                      | `data-state`                                     | `closing` while it goes                                                                                                                        |
+| `scrim`                                            | `data-for`                                       | `sheet`, `launcher`, `drawer`                                                                                                                  |
+| `launcher-row`                                     | `aria-selected`                                  | `true` on the one Enter opens                                                                                                                  |
+| Other buttons and tabs                             | `aria-pressed`, `aria-expanded`, `aria-selected` | As accessibility needs them                                                                                                                    |
 
 ## The page
 

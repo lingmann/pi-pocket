@@ -627,7 +627,13 @@ function AgentRows({ agents, compact }) {
 /**
  * A tile's square, in the shape the session list gives the same state: its folder's color.
  */
-const SHAPES = { waiting: "waiting", working: "working", done: "fresh", idle: "seen" };
+const SHAPES = {
+    waiting: "waiting",
+    limited: "limited",
+    working: "working",
+    done: "fresh",
+    idle: "seen",
+};
 
 /**
  * One tile. The whole app renders on every update while a session streams; a tile renders again only when what it
@@ -766,11 +772,13 @@ function tileProps(tiles, compact) {
         const status =
             session.waiting || (session.subagents?.waiting ?? 0) > 0
                 ? "waiting"
-                : session.busy || (session.subagents?.working ?? 0) > 0
-                  ? "working"
-                  : finishedUnseen(session, state)
-                    ? "done"
-                    : "idle";
+                : session.limited !== undefined
+                  ? "limited"
+                  : session.busy || (session.subagents?.working ?? 0) > 0
+                    ? "working"
+                    : finishedUnseen(session, state)
+                      ? "done"
+                      : "idle";
         // Where only its subagents keep a session waiting or working, the column's label says so. A session waits
         // while one of its subagents does too: its peek says whose calls wait.
         const waitingAgents = session.subagents?.waiting ?? 0;
@@ -790,15 +798,17 @@ function tileProps(tiles, compact) {
                     : steer
                       ? `${someAgents(waitingAgents)} ${waitingAgents === 1 ? "needs" : "need"} you`
                       : `${someAgents(waitingAgents)} waiting`
-                : status === "working"
-                  ? session.busy || compact
-                      ? "working"
-                      : `${someAgents(workingAgents)} working`
-                  : status === "done"
-                    ? "done · new"
-                    : session.id === lastLeft
-                      ? "just left"
-                      : "pinned";
+                : status === "limited"
+                  ? "waiting for a limit"
+                  : status === "working"
+                    ? session.busy || compact
+                        ? "working"
+                        : `${someAgents(workingAgents)} working`
+                    : status === "done"
+                      ? "done · new"
+                      : session.id === lastLeft
+                        ? "just left"
+                        : "pinned";
 
         return {
             key: session.id,

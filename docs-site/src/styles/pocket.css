@@ -1,7 +1,14 @@
 /*
- * Pi Pocket's look on Starlight, as the product site has it (site/style.css): Tokyo Night colors, JetBrains Mono for
- * titles and code, square shapes and thin borders. It follows the system's light or dark setting.
+ * Pi Pocket's look on Starlight, as the product site has it (site/style.css): Tokyo Night colors, Geist for text,
+ * JetBrains Mono for code, soft corners and thin borders. It follows the system's light or dark setting.
  */
+@font-face {
+    font-family: "Pocket Sans";
+    src: url("../../../site/fonts/Geist.woff2") format("woff2");
+    font-weight: 100 900;
+    font-display: swap;
+}
+
 @font-face {
     font-family: "Pocket Mono";
     src: url("../../../site/fonts/JetBrainsMono.woff2") format("woff2");
@@ -12,7 +19,7 @@
 :root {
     --sl-font-mono:
         "Pocket Mono", "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    --sl-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --sl-font: "Pocket Sans", "Geist", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     --sl-color-accent-low: #1f2a4a;
     --sl-color-accent: #7aa2f7;
     --sl-color-accent-high: #c0d4ff;
@@ -51,18 +58,26 @@
 .site-title,
 h1#_top,
 .sl-markdown-content :is(h1, h2, h3) {
-    font-family: var(--sl-font-mono);
-    letter-spacing: -0.01em;
+    font-weight: 600;
+    letter-spacing: -0.02em;
 }
 
-/* Square shapes, as the product site and the app have. */
-.sl-link-button,
+h1#_top {
+    letter-spacing: -0.035em;
+}
+
+/* Soft corners, as the product site and the app have. */
+.sl-link-button {
+    border-radius: 999px;
+}
+
 .card,
-.sl-link-card,
-site-search button,
-.expressive-code .frame,
+.sl-link-card {
+    border-radius: 14px;
+}
+
 .sl-markdown-content code {
-    border-radius: 0 !important;
+    border-radius: 5px;
 }
 
 /* Wide tables scroll inside themselves on a phone, not the page. */
@@ -91,7 +106,8 @@ site-search button,
 
 .sl-markdown-content p.member-meta .tag {
     border: 1px solid var(--sl-color-gray-4);
-    padding: 0 0.4rem;
+    border-radius: 999px;
+    padding: 0 0.5rem;
     font-family: var(--sl-font-mono);
     font-style: normal;
 }

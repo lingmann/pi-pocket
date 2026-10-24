@@ -32,6 +32,7 @@ const Settings = defineDoc<{ voiceInstruction?: string }>({
     kind: "x.victor-reply-style.settings",
     version: 1,
     scope: "session",
+    checkpointWhen: (_value, _ops, info) => info.deltasSinceBase >= 64,
     initial: () => ({}),
 });
 const VOICE =
@@ -335,6 +336,36 @@ test("reload, disable/re-enable, reopen, and repeated delivery preserve committe
     assert.deepEqual(await reopened.extensionCommands.run(id, owner(reopened), earlier), first);
     await speak(reopened, id, "victor");
     assert.equal(seen.at(-1), "Later");
+});
+
+test("voice settings survive repeated delta writes, checkpointing, and reset across restarts", async (t) => {
+    const { app, id, model, data } = await fixture(t);
+
+    // The initial write makes a base; 64 deltas follow, then the next change makes a new base.
+    for (let index = 0; index <= 65; index++) {
+        const result = await run(app, id, `set Instruction ${index}`);
+
+        assert.equal(result.status, "done");
+        assert.equal(result.type, "toast");
+        assert.deepEqual(await stored(app), { voiceInstruction: `Instruction ${index}` });
+    }
+
+    await app.close();
+    const reopened = await openApp(model, data);
+
+    t.after(() => reopened.close());
+    await show(reopened, id, "Instruction 65");
+    const reset = await run(reopened, id, "reset");
+
+    assert.equal(reset.status, "done");
+    assert.equal(reset.type, "toast");
+    assert.deepEqual(await stored(reopened), {});
+    await reopened.close();
+    const resetApp = await openApp(model, data);
+
+    t.after(() => resetApp.close());
+    await show(resetApp, id, VOICE, "Default");
+    assert.deepEqual(await stored(resetApp), {});
 });
 
 test("invalid stored fields fall back to the exact default, not a stale custom section", async (t) => {

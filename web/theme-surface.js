@@ -196,6 +196,8 @@ export const PARTS = [
     "approval",
     "live-line",
     "live-mark",
+    "live-limit",
+    "live-retry",
     "code-block",
     "code-head",
     "inline-code",

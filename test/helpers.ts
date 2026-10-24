@@ -9,6 +9,7 @@ import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi
 import { type ConversationId, UsageDoc } from "@earendil-works/pi-durable";
 import type { Attachment } from "../src/server/commands.ts";
 import type { User } from "../src/server/config.ts";
+import type { LimitTuning } from "../src/server/limit-gate.ts";
 import type { Client } from "../src/server/room.ts";
 
 export const context = BACKGROUND_CONTEXT;
@@ -72,6 +73,7 @@ export function openApp(
     model: ReturnType<typeof scriptedModel>,
     dataDir = join(root, "data"),
     now?: () => number,
+    limits?: Partial<LimitTuning>,
 ): Promise<App> {
     return PocketApp.open({
         dataDir,
@@ -81,6 +83,7 @@ export function openApp(
         configureModels: (models) => models.registerNativeProvider(model.provider),
         home,
         ...(now === undefined ? {} : { now }),
+        ...(limits === undefined ? {} : { limits }),
     });
 }
 

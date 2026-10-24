@@ -731,7 +731,7 @@ export type RailSpec = Action & {
 };
 
 /**
- * A row in the menu's App group.
+ * A row in the menu's App or Session group.
  * @since 0.14.0
  */
 export type MenuSpec = Action & {
@@ -750,6 +750,13 @@ export type MenuSpec = Action & {
      * @since 0.14.0
      */
     hint?: string;
+    /**
+     * The menu group. Defaults to "app"; "session" shows only in a session.
+     * Older apps ignore this field and use the App group.
+     * @since 0.21.0
+     * @experimental
+     */
+    group?: "app" | "session";
 };
 
 /**
@@ -1146,7 +1153,7 @@ export interface SessionChip {
 }
 
 /**
- * Chips under the titles of session rows. The list calls `chips` for each row each time it draws.
+ * Chips under the titles of session rows. Each row calls `chips` when it draws; unchanged rows can skip a draw.
  * @since 0.20.0
  * @experimental
  */

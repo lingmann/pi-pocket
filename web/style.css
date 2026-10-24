@@ -636,7 +636,7 @@ kbd {
 }
 
 :root[data-motion="reduced"] .boot-bar span {
-    width: 70%;
+    transform: scaleX(0.7);
 }
 
 /* Theme changes: the new look grows as a circle from where it was chosen (theme.js sets the place). */
@@ -709,17 +709,20 @@ kbd {
     overflow: hidden;
 }
 
+/* Scaled, not sized: a width would lay the page out on each frame, while the session it waits for loads. */
 .boot-bar span {
     display: block;
-    width: 0;
+    width: 100%;
     height: 100%;
     background: var(--body);
+    transform: scaleX(0);
+    transform-origin: left;
     animation: boot-fill 15s cubic-bezier(0.12, 0.6, 0.3, 1) forwards;
 }
 
 @keyframes boot-fill {
     to {
-        width: 70%;
+        transform: scaleX(0.7);
     }
 }
 
@@ -809,6 +812,23 @@ kbd {
 
 /* ─── Layout: windows on a desktop ─────────────────────────── */
 
+/*
+ * The notch and the rounded corners at a phone's sides when it lies on its side (0 on every other screen). Only the
+ * parts at a side edge keep clear of them (the rail, the top bar, the message box, what the conversation holds), so
+ * their backgrounds still run to the edge. A sidebar owns the left edge from 960px up, and tiled windows sit inside
+ * the layout's own padding, which takes the insets: neither leaves the left inset to the pane.
+ */
+:root {
+    --inset-l: env(safe-area-inset-left);
+    --inset-r: env(safe-area-inset-right);
+}
+
+@media (min-width: 960px) {
+    :root {
+        --inset-l: 0px;
+    }
+}
+
 .layout {
     display: flex;
     height: 100dvh;
@@ -830,6 +850,7 @@ kbd {
 .sidebar {
     display: none;
     width: min(var(--sidebar-w, 312px), max(312px, 40vw));
+    padding-left: env(safe-area-inset-left);
     flex: none;
     flex-direction: row;
     border-right: 1px solid var(--hair);
@@ -880,6 +901,16 @@ kbd {
     margin: 0 auto;
 }
 
+/* The rail keeps its buttons clear of the notch, and its line stays at their edge; the list keeps clear of the other side. */
+.home-list > .rail {
+    width: calc(56px + var(--inset-l));
+    padding-left: var(--inset-l);
+}
+
+.home-list > .sessions {
+    padding-right: calc(12px + var(--inset-r));
+}
+
 /* A short screen (a phone on its side): the rail drops its marks (Pi, and the sessions it is on) so its buttons fit,
  * and the home list puts its search and tabs side by side, so more sessions show (where they fit). */
 @media (max-height: 500px) {
@@ -888,6 +919,14 @@ kbd {
     }
     .rail > :is(span.rail-brand, span.rail-brand + .rail-gap, span.rail-button) {
         display: none;
+    }
+}
+
+/* A phone on its side (touch, and too short for any tablet): the list takes the whole width, not a column in the
+ * middle. A short desktop window keeps its column. */
+@media (max-height: 500px) and (min-width: 600px) and (pointer: coarse) {
+    .home-list > .sessions {
+        max-width: none;
     }
 }
 
@@ -930,14 +969,19 @@ kbd {
     }
     /* Folded: the rail alone, and the sidebar's border. */
     :root[data-rail="on"] .sidebar {
-        width: 57px;
+        width: calc(57px + env(safe-area-inset-left));
     }
     :root[data-tiling="on"][data-rail="on"] .sidebar {
         width: calc(56px + 2 * var(--border));
     }
+    :root[data-tiling="on"] .sidebar {
+        padding-left: 0;
+    }
 
     :root[data-tiling="on"] .layout {
-        padding: var(--gap-out);
+        --inset-r: 0px;
+        padding: var(--gap-out) calc(var(--gap-out) + env(safe-area-inset-right)) var(--gap-out)
+            calc(var(--gap-out) + env(safe-area-inset-left));
         gap: calc(var(--gap-in) * 2);
         background: var(--desk) var(--wallpaper, none) center / cover no-repeat;
     }
@@ -1035,7 +1079,7 @@ kbd {
     align-items: center;
     gap: 6px;
     min-height: calc(46px + 12px * var(--space-y) + env(safe-area-inset-top));
-    padding: env(safe-area-inset-top) 0 0;
+    padding: env(safe-area-inset-top) var(--inset-r) 0 var(--inset-l);
     border-bottom: 1px solid var(--hair);
     background: var(--bg);
 }
@@ -1444,6 +1488,12 @@ kbd {
      * message box, when a session long enough to scroll opens. */
     scrollbar-gutter: stable both-edges;
     position: relative;
+    /* The room it gives, for what may run wider than the column (a reply's code blocks and tables, below): the
+     * browser's own measure as it lays out, inside the scroll bar's gutters, so no script restyles the conversation
+     * after it is drawn. A fixed or sticky element in it keeps its place: inline-size containment makes neither a
+     * containing block nor a stacking context. */
+    container-type: inline-size;
+    padding-inline: var(--inset-l) var(--inset-r);
 }
 
 /* A column of turns: a person's message, what Pi did, Pi's reply, an approval, the live line. Its text size is
@@ -1458,6 +1508,10 @@ kbd {
     gap: calc(16px * var(--space-y));
     font-size: var(--text-size, 15px);
     line-height: var(--leading);
+}
+
+/* A session opened rises into place; on a phone, where the route slides it in, the slide alone (`transcript.js`). */
+.transcript.rising {
     animation: rise-in 0.36s var(--ease-out);
 }
 
@@ -1758,16 +1812,13 @@ kbd {
 }
 
 /*
- * A reply's code blocks and tables may run wider than its words, up to the pane's room (--pane-room, which
- * transcript.js measures) less the column's padding. A code block as wide as its longest line, at least the column's
- * width, centered on the column; a table as wide as its cells, from the column's start toward the pane's edge. On a
- * phone, and in a pane no wider than the column, the room is the column, so nothing changes.
+ * A reply's code blocks and tables may run wider than its words, up to the pane's room (the scroller's width, `cqi`)
+ * less the column's padding. A code block as wide as its longest line, at least the column's width, centered on the
+ * column; a table as wide as its cells, from the column's start toward the pane's edge. On a phone, and in a pane no
+ * wider than the column, the room is the column, so nothing changes.
  */
 .transcript {
-    --wide-room: max(
-        100%,
-        calc(var(--pane-room, 100%) - 56px * var(--space-x) - var(--transcript-gutter))
-    );
+    --wide-room: max(100%, calc(100cqi - 56px * var(--space-x) - var(--transcript-gutter)));
 }
 
 [data-part~="reply"] :is(.md, .md-part) > .code {
@@ -2179,12 +2230,16 @@ kbd {
 .timeline {
     position: relative;
     padding: calc(6px * var(--space-y)) 0;
-    animation: unroll var(--t-in) var(--ease-out);
 }
 
 /* A group that is one thought alone: its words, under the line that names it. */
 .activity-thought {
     padding: calc(10px * var(--space-y)) calc(12px * var(--space-x)) calc(12px * var(--space-y));
+}
+
+/* What a person opened unrolls (`unrolling`, transcript.js); what opens by itself (a session's open groups, a group
+ * that goes live) shows at once. A clip-path is painted on each frame, which a phone cannot spare as a session opens. */
+:is(.timeline, .activity-thought, .step-body).unrolling {
     animation: unroll var(--t-in) var(--ease-out);
 }
 
@@ -2274,7 +2329,7 @@ kbd {
     color: var(--err);
 }
 
-.step-mark.approval {
+.step-mark.asking {
     --tint: var(--warn-soft);
     color: var(--warn);
     box-shadow:
@@ -2282,7 +2337,7 @@ kbd {
         0 0 0 3px var(--bg);
 }
 
-.step-mark.running,
+.step-mark.spinning,
 .step-mark.agent {
     --tint: var(--accent-soft);
     color: var(--accent);
@@ -2389,10 +2444,6 @@ kbd {
 
 .step-extras + .step-body {
     margin-top: 0;
-}
-
-.step-body {
-    animation: unroll var(--t-in) var(--ease-out);
 }
 
 .step-extras > .thumbs {
@@ -2704,6 +2755,43 @@ pre.diff .del {
     text-overflow: ellipsis;
 }
 
+.live-line .live-limit {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+}
+
+.live-retry {
+    flex: none;
+    padding: 1px 8px;
+    font: inherit;
+    font-size: 12px;
+    color: var(--accent);
+    background: transparent;
+    border: 1px solid var(--accent-soft);
+    border-radius: var(--r-control);
+    cursor: pointer;
+}
+
+.live-retry:hover {
+    background: var(--accent-soft);
+}
+
+/* Narrow: the line wraps, so the wait's facts and Retry now stay inside the column. */
+@media (max-width: 600px) {
+    .live-line {
+        flex-wrap: wrap;
+        row-gap: 2px;
+    }
+
+    .live-line .live-limit {
+        flex: 0 1 auto;
+    }
+
+    .live-why {
+        flex: 1 1 100%;
+    }
+}
+
 .live-esc {
     flex: none;
     margin-left: auto;
@@ -2886,8 +2974,9 @@ pre.diff .del {
 /* ─── Composer ─────────────────────────────────────────────── */
 
 .composer-wrap {
-    padding: 4px calc(24px * var(--space-x))
-        calc(env(safe-area-inset-bottom) + 12px * var(--space-y));
+    padding: 4px calc(24px * var(--space-x) + var(--inset-r))
+        calc(env(safe-area-inset-bottom) + 12px * var(--space-y))
+        calc(24px * var(--space-x) + var(--inset-l));
     max-width: var(--composer-width);
     width: 100%;
     margin: 0 auto;
@@ -2895,7 +2984,8 @@ pre.diff .del {
 
 @media (max-width: 699px) {
     .composer-wrap {
-        padding-inline: calc(12px * var(--space-x));
+        padding-inline: calc(12px * var(--space-x) + var(--inset-l))
+            calc(12px * var(--space-x) + var(--inset-r));
     }
 }
 
@@ -4493,6 +4583,11 @@ pre.diff .del {
 .session-row {
     position: relative;
     padding-inline-start: calc(var(--linked-depth, 0) * 14px);
+}
+
+/* A row new to this page rises in, the rows in turn. Back to the list builds it again: those rows show as they were,
+ * and the list slides in whole (`data-route`), so it does not flicker (`sessions.js`). */
+.session-row.arriving {
     animation: rise-in 0.38s var(--ease-out) backwards;
     animation-delay: calc(min(var(--i, 0), 14) * 18ms);
 }
@@ -4602,7 +4697,7 @@ pre.diff .del {
 /*
  * A session's square: its folder's color (--folder), 8px with softly rounded corners, in the shape of its state. Solid:
  * finished, not read yet. Hollow and dim: read, or never run. Quadrants with one lit: working. Two bars: waiting for
- * you. A cross: failed, cut out of a solid square while not read, drawn once read.
+ * you. A hollow square with a dot: waiting for a provider's limit to clear. A cross: failed, cut out of a solid square while not read, drawn once read.
  */
 .state-mark {
     --line-w: 1.5px;
@@ -4665,6 +4760,12 @@ pre.diff .del {
 
 .state-mark.waiting {
     background: linear-gradient(90deg, currentColor 0 3px, transparent 0 5px, currentColor 0);
+}
+
+/* Pi waits for the provider's limit to clear: a hollow square, not dimmed, with a dot at its center. */
+.state-mark.limited {
+    box-shadow: inset 0 0 0 var(--line-w) currentColor;
+    background: radial-gradient(circle at center, currentColor 0 1.25px, transparent 1.5px);
 }
 
 .state-mark.failed {
@@ -5505,7 +5606,12 @@ button.session-chip {
 @media (min-width: 700px) {
     .overlay {
         align-items: flex-start;
-        padding: 7vh 16px 16px;
+        /* A sheet keeps 16px from the sides, and clear of a notch. */
+        padding: 7vh max(16px, var(--inset-r)) 16px max(16px, var(--inset-l));
+    }
+    /* The drawer keeps its place, and its rail clears the notch itself (below). */
+    .overlay.drawer-overlay {
+        padding-left: 16px;
     }
     .sheet {
         max-width: 500px;
@@ -5538,6 +5644,20 @@ button.session-chip {
         20px 0 40px -20px var(--sh);
     overflow: hidden;
     animation: drawer-in var(--t-in) var(--ease-out);
+}
+
+/* The drawer's rail keeps its buttons clear of the notch, as the home list's does; its line stays at their edge. */
+.drawer > .rail {
+    width: calc(56px + var(--inset-l));
+    padding-left: var(--inset-l);
+}
+
+/* Wide enough for `.overlay`'s 16px margin, the drawer starts that far in: the notch is that much nearer. */
+@media (min-width: 700px) {
+    .drawer > .rail {
+        width: calc(56px + max(0px, var(--inset-l) - 16px));
+        padding-left: max(0px, calc(var(--inset-l) - 16px));
+    }
 }
 
 @keyframes drawer-in {
@@ -6963,6 +7083,24 @@ button.session-chip {
     margin: 0.35rem 0 0;
 }
 
+/* The owner's choice of how long a run waits for a provider's limit to clear. */
+.limit-wait {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.6rem 0 0.8rem;
+    margin-bottom: 0.4rem;
+    border-bottom: 1px solid var(--line);
+}
+
+.limit-wait p {
+    margin: 0;
+}
+
+.limit-wait .segmented {
+    flex-wrap: wrap;
+}
+
 /* The owner's choice of models for subagents, above the providers. */
 .subagent-models {
     display: flex;
@@ -7160,6 +7298,7 @@ button.session-chip {
     position: fixed;
     inset: 0;
     z-index: 30;
+    padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
     background: var(--bg);
     display: flex;
     flex-direction: column;
@@ -7396,8 +7535,8 @@ button.session-chip {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: calc(env(safe-area-inset-top) + 3.2rem) 0.5rem
-        calc(env(safe-area-inset-bottom) + 0.5rem);
+    padding: calc(env(safe-area-inset-top) + 3.2rem) calc(0.5rem + env(safe-area-inset-right))
+        calc(env(safe-area-inset-bottom) + 0.5rem) calc(0.5rem + env(safe-area-inset-left));
     animation: fade var(--t-fade) var(--ease-almost);
     cursor: zoom-out;
 }
@@ -7422,7 +7561,8 @@ button.session-chip {
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    padding: calc(env(safe-area-inset-top) + 0.4rem) 0.4rem 0.4rem 0.9rem;
+    padding: calc(env(safe-area-inset-top) + 0.4rem) calc(0.4rem + env(safe-area-inset-right))
+        0.4rem calc(0.9rem + env(safe-area-inset-left));
     background: linear-gradient(color-mix(in srgb, var(--desk) 80%, transparent), transparent);
     cursor: default;
 }
@@ -10380,7 +10520,7 @@ textarea.notes {
     gap: 8px;
     overflow-x: auto;
     overscroll-behavior-x: contain;
-    padding: 8px 12px;
+    padding: 8px calc(12px + var(--inset-r)) 8px calc(12px + var(--inset-l));
     border-bottom: 1px solid var(--hair);
     scroll-snap-type: x proximity;
     scrollbar-width: none;
@@ -11178,6 +11318,7 @@ textarea.notes {
     position: fixed;
     inset: 0;
     z-index: 15;
+    padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
     display: flex;
     flex-direction: column;
     background: var(--bg);
@@ -11206,6 +11347,7 @@ textarea.notes {
         max-width: calc(100% - 440px);
         height: 100dvh;
         border-left: 1px solid var(--hair);
+        padding-inline: 0 var(--inset-r);
         animation-delay: 90ms;
     }
     :root[data-tiling="on"] .layout.filing .files-tile {
@@ -11225,6 +11367,7 @@ textarea.notes {
     position: fixed;
     inset: 0;
     z-index: 15;
+    padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
     display: flex;
     flex-direction: column;
     background: var(--bg);
@@ -11248,6 +11391,7 @@ textarea.notes {
         max-width: calc(100% - 440px);
         height: 100dvh;
         border-left: 1px solid var(--hair);
+        padding-inline: 0 var(--inset-r);
         animation-delay: 90ms;
     }
     .layout.paneling .ext-panel.wide {
@@ -11650,6 +11794,7 @@ textarea.notes {
     position: fixed;
     inset: 0;
     z-index: 15;
+    padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
     display: flex;
     flex-direction: column;
     background: var(--bg);
@@ -11678,6 +11823,7 @@ textarea.notes {
         max-width: calc(100% - 440px);
         height: 100dvh;
         border-left: 1px solid var(--line);
+        padding-inline: 0 var(--inset-r);
         animation-delay: 90ms;
     }
     :root[data-tiling="on"] .layout.browsing .browser {
@@ -12740,7 +12886,7 @@ textarea.notes {
 
 /*
  * Phones: a session opened slides in from the right, and going back brings the list (or the session before) in from
- * the left, so where back goes is where things came from. `data-route` is set while it slides (back.js).
+ * the left, so where back goes is where things came from. `data-route` is set on the window while it slides (back.js).
  */
 @media (max-width: 959px) {
     /* Held inside the window: a scroller sliding in from the right (a route, a swipe's lean) would make the page wider
@@ -12748,11 +12894,11 @@ textarea.notes {
     .pane {
         overflow-x: clip;
     }
-    :root[data-route="forward"] .pane > .scroller {
+    .pane[data-route="forward"] > .scroller {
         animation: route-forward 0.32s var(--ease-out);
     }
-    :root[data-route="back"] .pane > .scroller,
-    :root[data-route="back"] .home-list {
+    .pane[data-route="back"] > .scroller,
+    .pane[data-route="back"] > .home-list {
         animation: route-back 0.32s var(--ease-out);
     }
 }
@@ -13836,7 +13982,8 @@ textarea.notes {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 1rem 1rem calc(env(safe-area-inset-bottom) + 1rem);
+    padding: 1rem calc(1rem + var(--inset-r)) calc(env(safe-area-inset-bottom) + 1rem)
+        calc(1rem + var(--inset-l));
 }
 
 /*
@@ -13909,7 +14056,7 @@ textarea.notes {
     align-items: center;
     gap: 12px;
     min-height: 62px;
-    padding: env(safe-area-inset-top) 12px 0 22px;
+    padding: env(safe-area-inset-top) calc(12px + var(--inset-r)) 0 calc(22px + var(--inset-l));
     border-bottom: 1px solid var(--hair);
 }
 
@@ -14099,7 +14246,7 @@ textarea.notes {
     min-height: 0;
     display: flex;
     gap: 16px;
-    padding: 16px 22px 22px;
+    padding: 16px calc(22px + var(--inset-r)) 22px calc(22px + var(--inset-l));
 }
 
 .board-main {
@@ -14553,7 +14700,7 @@ textarea.notes {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 12px 12px 16px;
+    padding: 12px calc(12px + var(--inset-r)) 16px calc(12px + var(--inset-l));
 }
 
 /* Room under the last row for the bar over it. */
@@ -14633,8 +14780,8 @@ textarea.notes {
 
 .board-bar {
     position: absolute;
-    left: 8px;
-    right: 8px;
+    left: calc(8px + var(--inset-l));
+    right: calc(8px + var(--inset-r));
     bottom: 8px;
     z-index: 3;
     display: flex;
@@ -16748,7 +16895,7 @@ pre.gallery-code {
 }
 
 /* A session opened: its conversation settles up into place. */
-:root[data-motion="fluid"] .transcript {
+:root[data-motion="fluid"] .transcript.rising {
     animation: fluid-rise var(--t-glide) var(--ease-glide);
 }
 
@@ -16792,7 +16939,7 @@ pre.gallery-code {
 }
 
 /* A group of steps opening: it unrolls on the glide, and its first steps drop in one after another. */
-:root[data-motion="fluid"] :is(.timeline, .activity-thought, .step-body) {
+:root[data-motion="fluid"] :is(.timeline, .activity-thought, .step-body).unrolling {
     animation: unroll var(--t-glide) var(--ease-glide);
 }
 
@@ -16909,11 +17056,11 @@ pre.gallery-code {
 }
 
 @media (max-width: 959px) {
-    :root[data-motion="fluid"][data-route="forward"] .pane > .scroller {
+    :root[data-motion="fluid"] .pane[data-route="forward"] > .scroller {
         animation: route-forward var(--t-glide) var(--ease-glide);
     }
-    :root[data-motion="fluid"][data-route="back"] .pane > .scroller,
-    :root[data-motion="fluid"][data-route="back"] .home-list {
+    :root[data-motion="fluid"] .pane[data-route="back"] > .scroller,
+    :root[data-motion="fluid"] .pane[data-route="back"] > .home-list {
         animation: route-back var(--t-glide) var(--ease-glide);
     }
 }

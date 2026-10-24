@@ -29,6 +29,7 @@ import {
 import type { PocketApp } from "./app.ts";
 import { PipCompactionDoc } from "./docs.ts";
 import { describe } from "./errors.ts";
+import { noWait } from "./limit-gate.ts";
 import { clip, defang } from "./fence.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -420,7 +421,8 @@ export class PipCompaction {
                         },
                     ],
                 },
-                {
+                // A summary is never worth a wait for a limit.
+                noWait({
                     // As Pi Durable's summaries: Pi's timeout and retries, the conversation's provider identity, and
                     // within what Pi's settings keep free for an answer.
                     ...this.#app.streamSettings(),
@@ -434,7 +436,7 @@ export class PipCompaction {
                     ...(hookContext.abortSignal === undefined
                         ? {}
                         : { signal: hookContext.abortSignal }),
-                },
+                }),
             );
             const summary = summaryOf(message);
             const key = `${message.provider}/${message.model}`;
