@@ -89,7 +89,9 @@ After installing an update that changes Victor's server code or assets:
 2. Run `just prepare-victor` in the serving checkout.
 3. Have the owner use **Menu → Restart server**, then reload clients before activating Victor.
 
-To roll back, restore the previous source/code and repeat these steps. Retained asset directories alone are not a rollback.
+Pi Pocket 0.21.0 upgrades the database through Pi Durable 1.4.0. Before deploying it, stop the server and back up the complete Pocket data folder. Older Durable versions cannot open the upgraded database.
+
+To roll back code or assets, restore the previous source/code and repeat these steps. Rolling back across the 0.21.0 database upgrade also requires restoring the pre-upgrade data backup with the server stopped. Retained asset directories alone are not a rollback.
 
 ## Troubleshooting
 
@@ -163,6 +165,8 @@ These are integration hooks and shared dependencies, not files owned exclusively
 | [`src/server/extension-commands.ts`](../src/server/extension-commands.ts), [`src/server/extension-web.ts`](../src/server/extension-web.ts) | Register and dispatch the owner-only global style command, including authorization, durable runs, retry deduplication, transcript cards, and private toasts. Keep these shared semantics in Pocket, not Victor.                                                                                                    |
 | [`src/server/reload.ts`](../src/server/reload.ts)                                                                                          | Registers the built-in Victor reply-style extension and its title. Preserve existing extension order and switches.                                                                                                                                                                                                 |
 | [`src/server/commands.ts`](../src/server/commands.ts)                                                                                      | Applies existing access, driving-turn, model, spend, attribution, request-ID, and queue rules to submitted text. Validates the optional Victor source and records it before admission. Preserve typed-message command expansion and attachments; Victor's plain-text restrictions belong in its client controller. |
+
+Victor's input-source records and reply-style settings declare the checkpoint policies required by Pi Durable 1.4.0. Both write a new base after 64 stored deltas; document kinds, versions, scopes, history, and fork behavior remain unchanged. Configuration tests cover repeated writes across this boundary, reopening the store, and resetting the override.
 
 ### Composer handoff boundary
 

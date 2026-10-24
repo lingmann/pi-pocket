@@ -146,6 +146,11 @@ export async function conversationRoutes(
         return json(response, 200, { ok: true });
     }
 
+    // A run waiting for its provider's limit tries now, rather than at its time.
+    if (third === "limit" && fourth === "retry" && method === "POST") {
+        return json(response, 200, { ok: await app.commands.retryLimit(id, user) });
+    }
+
     // A failed subagent dealt with: `at` says which failure the person saw.
     if (third === "dismiss" && method === "POST") {
         const body = await readJson<{ at?: unknown }>(request);

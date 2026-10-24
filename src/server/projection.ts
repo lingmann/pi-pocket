@@ -16,6 +16,7 @@ import {
     type ShellData,
     splitAttachments,
 } from "./entry-format.ts";
+import type { WaitView } from "./limit-gate.ts";
 import type { StreamTiming } from "./timing.ts";
 
 /** Shortest first-to-last-token window, in ms, that reads as a genuine stream rather than one buffered flush. */
@@ -243,8 +244,28 @@ export type ClientToolSlot = {
     details?: unknown;
 };
 
+/** A run waiting for a provider's limit to clear (`limit-gate.ts`), as a tab shows it. Times are the server's clock. */
+export type ClientLimit = {
+    provider: string;
+    modelId?: string;
+    /** `account`: every model of the provider waits. `model`: this one does. */
+    scope: "account" | "model";
+    /** `reset`: until a time the provider gave. `backoff`: no time is known, so it tries again at intervals. */
+    kind: "reset" | "backoff";
+    /** When the next request goes out. */
+    until: number;
+    /** The reset the provider gave, when it gave one. */
+    resetAt?: number;
+    /** What the provider said, as one short line of plain text. */
+    reason: string;
+    tries: number;
+    /** The request that finds out is out now. */
+    probing: boolean;
+};
+
 export type ClientLive = {
     busy: boolean;
+    limit?: ClientLimit;
     generation?: {
         attempt: number;
         message?: { blocks: ClientBlock[] };
@@ -579,6 +600,21 @@ export function projectEntry(entry: EntryRecord, full = false): ClientEntry | un
         default:
             return { id, kind: "other", entryKind: entry.kind };
     }
+}
+
+/** A wait for a limit as a tab gets it: no gate key, which names the sign-in. */
+export function projectLimit(wait: WaitView): ClientLimit {
+    return {
+        provider: wait.provider,
+        ...(wait.modelId === undefined ? {} : { modelId: wait.modelId }),
+        scope: wait.scope,
+        kind: wait.kind,
+        until: wait.until,
+        ...(wait.resetAt === undefined ? {} : { resetAt: wait.resetAt }),
+        reason: wait.reason,
+        tries: wait.tries,
+        probing: wait.probing,
+    };
 }
 
 export function projectLive(live: LiveState | undefined): ClientLive {
@@ -1009,6 +1045,10 @@ export function peekLines(
 
     if (live.generation?.message !== undefined) {
         blocks(live.generation.message.blocks, true);
+    }
+
+    if (live.limit !== undefined) {
+        lines.push({ kind: "event", text: `Waiting for ${live.limit.provider}'s limit to clear` });
     }
 
     return lines.slice(-count);

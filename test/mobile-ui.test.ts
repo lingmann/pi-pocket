@@ -1,8 +1,10 @@
 import {
     type App,
     cleanUp,
+    lastText,
     newSession,
     openApp,
+    owner,
     root,
     say,
     scriptedModel,
@@ -14,8 +16,11 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
+import type { FauxResponseStep } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { Browsers } from "../src/server/browser.ts";
+import { BrowserError, Chromium } from "../src/server/browser/cdp.ts";
 import { findBrowser } from "../src/server/browser/discovery.ts";
 import type { BrowserPage } from "../src/server/browser/page.ts";
 import { VIEWPORTS } from "../src/server/browser/viewport.ts";
@@ -25,6 +30,17 @@ const chromium = findBrowser();
 const real = {
     skip: chromium === undefined ? "no Chromium-based browser on this machine" : false,
 } as const;
+
+/** "risky please" calls a tool, which Lancet Guard asks about; everything else is echoed. */
+const route: FauxResponseStep = (request) => {
+    const { text } = lastText(request as never);
+
+    return text === "risky please"
+        ? fauxAssistantMessage([fauxToolCall("bash", { command: "true" })], {
+              stopReason: "toolUse",
+          })
+        : fauxAssistantMessage([fauxText(`echo: ${text}`)]);
+};
 
 let app: App;
 let server: Server;
@@ -132,7 +148,7 @@ before(async () => {
 
     writeFileSync(join(work, "README.md"), "# Hello\n\nA file to read.\n");
     writeFileSync(join(work, "web.env"), "PORT=3000\nHOST=127.0.0.1\n");
-    app = await openApp(scriptedModel());
+    app = await openApp(scriptedModel(route));
     server = createServer(
         createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
     );
@@ -164,6 +180,40 @@ after(async () => {
     await app?.close();
     cleanUp();
 });
+
+/** How far the transcript is from its bottom, in pixels. */
+const gap = () =>
+    inPage<number>(`
+        const scroller = document.querySelector(".pane > .scroller");
+
+        return JSON.stringify(Math.round(scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight));
+    `);
+
+/** Open the first session, with `count` rows of messages and answers, as the server would send them. */
+async function openWithRows(count: number): Promise<void> {
+    await fresh();
+    await goTo(first);
+    await until(
+        () =>
+            inPage<boolean>(
+                `return JSON.stringify((await import("/store.js")).store.state.view.conversation?.id === ${Number(first)})`,
+            ),
+        "the session's view",
+    );
+    await page.evaluate(`
+        const { store } = await import("/store.js");
+        const entries = Array.from({ length: ${count} }, (_, n) => ({ id: 920000 + n, kind: "assistant",
+            stopReason: "stop", at: Date.now(),
+            blocks: [{ type: "text", text: "Answer " + n + "\\n\\n" + "Words. ".repeat(40) }] }));
+
+        store.set((state) => ({
+            transcriptFrom: null,
+            view: { ...state.view, entries: new Map(entries.map((entry) => [entry.id, entry])),
+                order: entries.map((entry) => entry.id), live: { busy: false } },
+        }));
+        "shown";
+    `);
+}
 
 test("back closes the open file, then the Files tile, then leaves the session", real, async () => {
     await fresh();
@@ -597,7 +647,8 @@ test(
         const fetched = window.fetch;
         window.fetch = (url, init) =>
             String(url).endsWith("/submit") ? Promise.reject(new TypeError("offline")) : fetched(url, init);
-        (await import("/pip.js")).askPip("hello pip");
+        // Awaited: a promise the script leaves behind can be collected before it settles, which fails the call.
+        await (await import("/pip.js")).askPip("hello pip");
     `);
         await until(
             async () =>
@@ -615,6 +666,8 @@ test(
     real,
     async () => {
         await fresh();
+        // Wide, where the sidebar's list shows beside the session: a phone in a session draws no list at all.
+        await page.setViewport(VIEWPORTS.desktop);
         await goTo(first);
         await reach({ path: `/s/${first}` }, "the session");
         await until(
@@ -628,7 +681,8 @@ test(
             kept: boolean;
             text: string;
             quiet: number;
-            listed: number;
+            same: number;
+            listed: string[];
             image: string | null;
         }>(`
         const { h, options, render } = await import("preact");
@@ -641,33 +695,405 @@ test(
         const first = box.querySelector("p");
 
         render(h(Markdown, { text: "First block.\\n\\n![x](a.png)\\n\\nSecond, longer", cache: false }), box);
-        let rows = 0;
+        let rows = [];
         const diffed = options.diffed;
 
         let quiet;
+        let same;
 
         options.diffed = (vnode) => {
-            rows += vnode.type?.name === "SessionRow" ? 1 : 0;
+            if (vnode.type?.name === "SessionRow") {
+                rows.push(vnode.props.session.title ?? "");
+            }
+
             diffed?.(vnode);
         };
 
         try {
             store.set((state) => ({ view: { ...state.view } }));
             await settle();
-            quiet = rows;
+            quiet = rows.length;
+            // The same sessions in a new list: no row has anything new to show.
             store.set((state) => ({ sessions: [...state.sessions] }));
+            await settle();
+            same = rows.length - quiet;
+            rows = [];
+            // One session renamed: its row, and no other.
+            store.set((state) => ({
+                sessions: state.sessions.map((session) =>
+                    session.id === ${Number(first)} ? { ...session, title: "Renamed here" } : session,
+                ),
+            }));
             await settle();
         } finally {
             options.diffed = diffed;
         }
 
-        return JSON.stringify({ kept: box.querySelector("p") === first, text: box.textContent, quiet, listed: rows, image: box.querySelector("img")?.getAttribute("src") ?? null });
+        return JSON.stringify({ kept: box.querySelector("p") === first, text: box.textContent, quiet, same, listed: rows, image: box.querySelector("img")?.getAttribute("src") ?? null });
     `);
 
         assert.ok(drawn.kept, "the first block stays as it was drawn");
         assert.match(drawn.text, /Second, longer/, "the last block grows");
         assert.match(drawn.image ?? "", /^\/api\//, "an image path points at the server");
         assert.equal(drawn.quiet, 0, "a new view leaves the session list alone");
-        assert.ok(drawn.listed > 0, "a new session list draws it");
+        assert.equal(drawn.same, 0, "the same sessions again draw no row");
+        assert.deepEqual(drawn.listed, ["Renamed here"], "a changed session draws its row alone");
+    },
+);
+
+test("a reconnect that brings the same data keeps it, and draws no session row", real, async () => {
+    await fresh();
+
+    const after = await inPage<{ same: string[]; rows: number }>(`
+        const { options } = await import("preact");
+        const { connect, store } = await import("/store.js");
+        const settle = () => new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve)));
+        const keys = ["me", "models", "guard", "server", "themeList", "folderFavorites", "sessions"];
+        const before = Object.fromEntries(keys.map((key) => [key, store.state[key]]));
+        const stream = store.state.streamId;
+        const Source = window.EventSource;
+        let rows = 0;
+        let received;
+        const listed = new Promise((resolve) => (received = resolve));
+        const diffed = options.diffed;
+
+        options.diffed = (vnode) => {
+            rows += vnode.type?.name === "SessionRow" ? 1 : 0;
+            diffed?.(vnode);
+        };
+        // The reconnect's own list must arrive before identity and draws are checked.
+        window.EventSource = class extends Source {
+            constructor(url) {
+                super(url);
+                this.addEventListener("sessions", received, { once: true });
+            }
+        };
+
+        try {
+            connect();
+            await listed;
+            await settle();
+        } finally {
+            window.EventSource = Source;
+            options.diffed = diffed;
+        }
+
+        if (store.state.streamId === stream) {
+            throw new Error("the reconnect did not receive a new stream");
+        }
+
+        return JSON.stringify({ same: keys.filter((key) => store.state[key] !== before[key]), rows });
+    `);
+
+    assert.deepEqual(after.same, [], "every equal value keeps its identity");
+    assert.equal(after.rows, 0, "no session row draws again");
+});
+
+test("back to the list slides it in whole, and its rows do not rise in again", real, async () => {
+    await fresh();
+    await tap(row(first));
+    await reach({ path: `/s/${first}` }, "the session");
+    await page.evaluate(`
+        window.listRoutes = [];
+        window.listRouteObserver = new MutationObserver((records) => {
+            window.listRoutes.push(...records.flatMap((record) =>
+                [record.target.dataset.route, record.oldValue]));
+        });
+        window.listRouteObserver.observe(document.documentElement, {
+            attributes: true, subtree: true, attributeFilter: ["data-route"], attributeOldValue: true,
+        });
+    `);
+    await back();
+    await reach({ path: "/" }, "back to the list");
+
+    const shown = await inPage<{ rows: number; animating: number; slide: boolean }>(`
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        const rows = [...document.querySelectorAll(".home-list .session-row")];
+
+        window.listRouteObserver.disconnect();
+
+        return JSON.stringify({
+            rows: rows.length,
+            animating: rows.filter((each) => each.classList.contains("arriving") || each.getAnimations().length).length,
+            slide: window.listRoutes.includes("back"),
+        });
+    `);
+
+    assert.ok(shown.rows > 0, "the list shows its rows");
+    assert.equal(shown.animating, 0, "no row rises in again");
+    assert.ok(shown.slide, "the list slides in from the left");
+});
+
+test(
+    "the transcript stays at the bottom as an answer streams, and as a row grows",
+    real,
+    async () => {
+        const frames = () => new Promise((resolve) => setTimeout(resolve, 300));
+
+        await openWithRows(30);
+        await until(async () => (await gap()) < 2, "the bottom, once the rows show");
+
+        // Pi writes: the answer grows with no new entry, update after update.
+        for (let n = 1; n <= 3; n++) {
+            await page.evaluate(`
+            const { store } = await import("/store.js");
+            const text = "Streaming. ".repeat(${n * 60});
+
+            store.set((state) => ({ view: { ...state.view, live: { busy: true,
+                generation: { attempt: 0, message: { blocks: [{ type: "text", text }] } } } } }));
+            "written";
+        `);
+            await frames();
+            assert.ok((await gap()) < 2, `at the bottom after streamed update ${n}`);
+        }
+
+        // A row grows by itself, with no draw of the app (an image, a card that draws late).
+        await page.evaluate(`
+        const tall = document.createElement("div");
+
+        tall.style.height = "400px";
+        [...document.querySelectorAll(".transcript > *")].at(-1).append(tall);
+    `);
+        await frames();
+        assert.ok((await gap()) < 2, "at the bottom after a row grew by itself");
+    },
+);
+
+test("the sanitizer still takes out what is unsafe, every time", real, async () => {
+    await openWithRows(2);
+
+    const unsafe = [
+        "<script>window.hit = 1</script>",
+        '<img src="x" onerror="window.hit = 2">',
+        '<a href=" JaVaScRiPt:window.hit = 3">a</a>',
+        '<div data-part="approval" class="sheet" style="position:fixed" id="app">b</div>',
+        "![shot](file:///tmp/shot.png)",
+    ].join("\n\n");
+    const drawn = await inPage<{ first: string; second: string }>(`
+        const { h, render } = await import("preact");
+        const { Markdown } = await import("/ui.js");
+        const draw = () => {
+            const box = document.createElement("div");
+
+            render(h(Markdown, { text: ${JSON.stringify(unsafe)}, cache: false }), box);
+
+            return box.innerHTML;
+        };
+        // Twice: the settings kept from the first draw give the same result.
+        return JSON.stringify({ first: draw(), second: draw() });
+    `);
+
+    assert.equal(drawn.second, drawn.first, "the same result each time");
+
+    for (const gone of ["<script", "onerror", "JaVaScRiPt", "data-part=", "position:fixed"]) {
+        assert.ok(!drawn.first.includes(gone), `${gone} is taken out`);
+    }
+
+    assert.match(drawn.first, /<img[^>]+src="\/api\/c\/\d+\/file\?path=%2Ftmp%2Fshot\.png"/);
+    assert.equal(await inPage<unknown>(`return JSON.stringify(window.hit ?? null)`), null);
+});
+
+// Issue #140: the circle that says how a call went keeps its own size while it waits for an approval.
+test("a call's mark keeps its circle while it waits for an approval", real, async () => {
+    // Lancet Guard is off by default; turn it on, asking about every call.
+    await app.setExtensionEnabled(owner(app), "guard.ts", true);
+    app.guard.judge = async (_tool, args) =>
+        ({
+            subject: String(args.command),
+            decision: { action: "ask", reason: "risky", source: "test", terminate: false },
+        }) as never;
+
+    const one = await newSession(app);
+
+    await fresh();
+    await goTo(one);
+    await app.commands.submit(one, owner(app), { text: "risky please", requestId: "mark-140" });
+
+    const mark = () =>
+        inPage<Record<string, string> | null>(`
+            const mark = document.querySelector('[data-part~="tool-call"][data-state="waiting"] [data-part~="step-mark"]');
+            const shape = mark && getComputedStyle(mark);
+
+            return JSON.stringify(shape && { width: shape.width, height: shape.height,
+                padding: shape.paddingTop, border: shape.borderTopWidth });
+        `);
+
+    await until(async () => (await mark()) !== null, "the call waiting", 20_000);
+    assert.deepEqual(await mark(), {
+        width: "19px",
+        height: "19px",
+        padding: "0px",
+        border: "0px",
+    });
+});
+
+// Issue #131: a phone on its side with a notch. Another Chromium fakes the safe-area insets on its own page.
+test(
+    "with a notch, the rail, the top bar, and the message box clear it; with none, nothing moves",
+    real,
+    async (t) => {
+        const WIDTH = 844;
+        const NOTCH = 47;
+        const chrome = await Chromium.launch(chromium!, mkdtempSync(join(root, "insets-")), []);
+
+        t.after(() => chrome.kill());
+
+        /** A signed-in page on its side with `inset` pixels at each side; `run` evaluates a function body in it. */
+        async function visit(inset: number) {
+            const { connection } = chrome;
+            const { targetId } = await connection.send("Target.createTarget", {
+                url: "about:blank",
+            });
+            const { sessionId } = await connection.send("Target.attachToTarget", {
+                targetId,
+                flatten: true,
+            });
+            const send = (method: string, params: Record<string, unknown> = {}) =>
+                connection.send(method, params, sessionId);
+
+            const run = async <T>(body: string): Promise<T> => {
+                const answer = await send("Runtime.evaluate", {
+                    expression: `(async () => { ${body} })().then((value) => JSON.stringify(value ?? null))`,
+                    awaitPromise: true,
+                    returnByValue: true,
+                });
+
+                return JSON.parse(answer.result.value as string) as T;
+            };
+
+            await send("Emulation.setDeviceMetricsOverride", {
+                width: WIDTH,
+                height: 390,
+                deviceScaleFactor: 2,
+                mobile: true,
+            });
+            await send("Emulation.setSafeAreaInsetsOverride", {
+                insets: { top: 0, left: inset, bottom: 0, right: inset },
+            });
+            await send("Page.navigate", {
+                url: `${base}/login?token=${encodeURIComponent(app.config.ownerToken)}`,
+            });
+            await until(
+                () =>
+                    run<boolean>(`return !!document.querySelector(".home-list > .rail")`).catch(
+                        () => false,
+                    ),
+                "the session list",
+                20_000,
+            );
+
+            return run;
+        }
+
+        /** Where the visible elements that match `selector` start and end across the screen. */
+        const edges = (run: Awaited<ReturnType<typeof visit>>, selector: string) =>
+            run<{ left: number; right: number }[]>(`
+            return [...document.querySelectorAll(${JSON.stringify(selector)})]
+                .map((element) => element.getBoundingClientRect())
+                .filter((box) => box.width > 0 && box.height > 0)
+                .map((box) => ({ left: Math.round(box.left), right: Math.round(box.right) }));
+        `);
+
+        /** Open the session from the list, and wait for its bar, thread, and message box to rest. */
+        const enter = async (run: Awaited<ReturnType<typeof visit>>) => {
+            await run(`(await import("/store.js")).navigate(${Number(first)})`);
+            await until(
+                () =>
+                    run<boolean>(`
+                    return [".topbar", ".pane > .scroller", ".composer-wrap .composer"].every((each) => document.querySelector(each))
+                        && document.getAnimations().every((each) => each.effect?.getComputedTiming().iterations === Infinity);
+                `),
+                "the conversation",
+            );
+        };
+
+        try {
+            const notched = await visit(NOTCH);
+
+            /** Every element that matches is past the notch on both sides, and there is at least one. */
+            const clear = async (selector: string) => {
+                const found = await edges(notched, selector);
+
+                assert.ok(found.length > 0, `${selector} shows`);
+                assert.ok(
+                    found.every((edge) => edge.left >= NOTCH && edge.right <= WIDTH - NOTCH),
+                    `${selector} is in the notch: ${JSON.stringify(found)}`,
+                );
+            };
+
+            await clear(".home-list > .rail button, .home-list > .rail .avatar");
+            await enter(notched);
+            await clear(".topbar button");
+            await clear(".composer-wrap .composer");
+
+            const plain = await visit(0);
+
+            assert.deepEqual(await edges(plain, ".home-list > .rail"), [{ left: 0, right: 56 }]);
+            await enter(plain);
+            assert.deepEqual(
+                await plain<string[]>(`
+                const pad = (selector) => getComputedStyle(document.querySelector(selector)).paddingLeft;
+
+                return [pad(".topbar"), pad(".pane > .scroller")];
+            `),
+                ["0px", "0px"],
+            );
+        } catch (error) {
+            if (error instanceof BrowserError) {
+                t.skip("this Chromium cannot fake safe-area insets");
+
+                return;
+            }
+
+            throw error;
+        }
+    },
+);
+
+test(
+    "Refresh in Changes reads the diffs on screen again, even when the file list is the same",
+    real,
+    async () => {
+        await fresh();
+
+        const requests = await inPage<{ before: number; after: number }>(`
+        const { store } = await import("/store.js");
+        const { DiffReview } = await import("/diff.js");
+        const { h, render } = await import("preact");
+        const box = document.createElement("div");
+        const fetched = window.fetch;
+        let diffs = 0;
+
+        window.fetch = async (url, ...args) => {
+            if (String(url).endsWith("/changes")) {
+                return new Response(JSON.stringify({ repo: { root: "/tmp", head: "abc" }, more: 0, piOnly: [],
+                    files: [{ path: "a.txt", kind: "modified", version: "5:1", added: 1, removed: 1 }] }));
+            }
+
+            if (String(url).includes("/changes/diff?")) {
+                diffs++;
+
+                return new Response("diff --git a/a.txt b/a.txt\\n--- a/a.txt\\n+++ b/a.txt\\n@@ -1 +1 @@\\n-old\\n+new\\n");
+            }
+
+            return fetched(url, ...args);
+        };
+        document.body.append(box);
+        store.set({ conversationId: ${Number(first)} });
+        render(h(DiffReview, { active: false }), box);
+        store.subscribe(() => render(h(DiffReview, { active: false }), box));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        const before = diffs;
+
+        box.querySelector('[aria-label="Refresh"]').click();
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        window.fetch = fetched;
+
+        return JSON.stringify({ before, after: diffs });
+    `);
+
+        assert.equal(requests.before, 1);
+        assert.equal(requests.after, 2, "Refresh asks for the diff again");
     },
 );

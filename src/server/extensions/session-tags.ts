@@ -8,6 +8,7 @@ const Tags = defineDoc<{ tags: Record<string, string[]> }>({
     kind: "x.session-tags.tags",
     version: 1,
     scope: "session",
+    checkpointWhen: () => false,
     initial: () => ({ tags: {} }),
 });
 

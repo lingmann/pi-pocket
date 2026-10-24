@@ -1161,6 +1161,32 @@ export class Commands {
         );
     }
 
+    /**
+     * Send the request of a run that waits for a provider's limit now, rather than at its time (`limit-gate.ts`): of
+     * this conversation, or of its subagents. The request goes whether or not the limit has cleared: the provider
+     * rejects it at no cost, or answers. Who may see and steer the session may. False: nothing there waits.
+     */
+    async retryLimit(id: ConversationId, user: User): Promise<boolean> {
+        const app = this.#app;
+
+        app.requireSee(user, id);
+        app.requireSteer(user);
+
+        let sent = app.limits.retryNow(Number(id));
+
+        for (const wait of app.limits.waits()) {
+            if (app.rootOf(wait.conversationId as unknown as ConversationId) === id) {
+                sent = app.limits.retryNow(wait.conversationId) || sent;
+            }
+        }
+
+        if (sent) {
+            await app.collab.activity(id, user, "tried again without waiting for the limit");
+        }
+
+        return sent;
+    }
+
     /** Stop the run. Anyone who can steer may, even while someone else drives: stopping is the safe direction. */
     async abort(id: ConversationId, user: User): Promise<void> {
         const app = this.#app;

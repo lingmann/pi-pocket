@@ -33,7 +33,7 @@ import {
     panelsBeside,
     store,
 } from "./store.js";
-import { fromExtensions, SLOTS } from "./slots.js";
+import { fromExtensions, SLOTS, slotsChanged } from "./slots.js";
 import { setCallSummary } from "./turns.js";
 import {
     html,
@@ -232,8 +232,13 @@ function chargeOpen(record) {
 /** Whether a redraw is due at the next frame, for every change made until then. */
 let due = false;
 
-/** Draw what extensions add again at the next frame: every change until then goes in the same redraw. */
+/**
+ * Draw what extensions add again at the next frame: every change until then goes in the same redraw. The slots' orders
+ * (`slots.js`) are worked out again at once, for a draw that comes before then.
+ */
 function redraw() {
+    slotsChanged();
+
     if (due) {
         return;
     }
@@ -552,6 +557,7 @@ function teardown(record) {
     }
 
     record.arrangements.clear();
+    slotsChanged();
 
     if (record.calls.size > 0) {
         record.calls.clear();
@@ -682,6 +688,10 @@ function check(kind, spec) {
         !(Array.isArray(spec.keywords) && spec.keywords.every((each) => typeof each === "string"))
     ) {
         throw new Error(`${name} ${spec.id}: keywords are a list of words`);
+    }
+
+    if (kind === "menu" && spec.group !== undefined && !["app", "session"].includes(spec.group)) {
+        throw new Error(`${name} ${spec.id}: group is "app" or "session"`);
     }
 
     if (spec.before !== undefined && spec.after !== undefined) {
@@ -1773,20 +1783,22 @@ export function ExtensionRailButtons() {
 const closeOf = (spec) => (spec.page !== undefined ? closePage() : closeExtPanel());
 
 /** The menu's rows that extensions added: `{ key, label, hint, run }`, run closing the menu first. */
-export function extensionMenuItems() {
-    return added("menu").map(({ record, spec }) => ({
-        key: `${record.module}:${spec.id}`,
-        label: spec.label,
-        hint: spec.hint ?? "",
-        run: () => {
-            // A page or panel shows under the menu, which closes; a sheet takes the menu's place.
-            if (spec.sheet === undefined) {
-                closeSheet();
-            }
+export function extensionMenuItems(group = "app") {
+    return added("menu")
+        .filter(({ spec }) => (spec.group ?? "app") === group)
+        .map(({ record, spec }) => ({
+            key: `${record.module}:${spec.id}`,
+            label: spec.label,
+            hint: spec.hint ?? "",
+            run: () => {
+                // A page or panel shows under the menu, which closes; a sheet takes the menu's place.
+                if (spec.sheet === undefined) {
+                    closeSheet();
+                }
 
-            activate(record, spec);
-        },
-    }));
+                activate(record, spec);
+            },
+        }));
 }
 
 /** The launcher's actions that extensions added, as launcher items. */

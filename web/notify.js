@@ -21,6 +21,8 @@ export function updateBadge(state) {
     if (
         countedFrom?.sessions === state.sessions &&
         countedFrom.chatRead === state.chatRead &&
+        countedFrom.chatReads === state.chatReads &&
+        countedFrom.me === state.me &&
         countedFrom.conversationId === state.conversationId
     ) {
         return;
@@ -29,6 +31,8 @@ export function updateBadge(state) {
     countedFrom = {
         sessions: state.sessions,
         chatRead: state.chatRead,
+        chatReads: state.chatReads,
+        me: state.me,
         conversationId: state.conversationId,
     };
     const count = state.sessions.filter(
@@ -88,6 +92,11 @@ const KINDS = [
         "approval",
         "Approvals",
         "when Lancet Guard asks before a command; allow or deny it from the notification",
+    ],
+    [
+        "limit",
+        "Waiting for a limit",
+        "when a run waits more than ten minutes for a provider's limit to clear",
     ],
     ["mention", "Mentions", "when someone writes @your name in a chat"],
     ["chat", "Chat messages", "in sessions you take part in"],

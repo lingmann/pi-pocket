@@ -75,3 +75,11 @@ Observed in the merged Victor checkout on macOS, Node 24.22.0, and Chromium. The
 The full-suite run left 14 unresolved failures: these three and 11 matching previously recorded path, launcher-shortcut/focus, early-restart, and extension-reload signatures. Final focused shared-submission and Victor attribution tests passed all 64 cases. The full suite was not repeated after the final focused fixes.
 
 Repository-wide `npm run lint` also reports a missing blank line at `test/artifact-inline.test.ts:487` (`@stylistic/padding-line-between-statements`). That file is unchanged from the incoming release. Changed integration files pass lint. Whole-merge `git diff --cached --check` also reports whitespace in the incoming `IBMPlexMono-OFL.txt`, `Iosevka-OFL.txt`, and `NerdFonts-README.txt` under `web/fonts/`; those bundled files remain unchanged. No unrelated fixes or pristine-upstream comparison were performed.
+
+## v0.21.0: rate-limit retry UI timeout
+
+Observed in the merged Victor checkout on macOS, Node 24.22.1, and Chromium. The runs excluded `VENICE_API_KEY`, `MISTRAL_API_KEY`, `MEGAARK_API_KEY`, and `CLOUDFLARE_API_KEY`. The original release has not been run separately.
+
+`limit-wait-ui.test.ts`'s **The live line says Pi waits for a limit and has Retry now, which sends the request** timed out waiting for “the answer” after clicking Retry now. The wait indicator and mobile layout assertions had passed. This new test and its retry implementation match the incoming release. A sequential run with the two artifact UI suites passed all 22 tests without a code change; the cause remains unverified, and that pass does not establish a fix.
+
+The full run passed 947 tests, failed 35, and skipped 2. Of the failures, 21 came from Chromium `Browser.getVersion` timeouts in the shared setup of `artifact-bridge-ui.test.ts` and `artifact-inline-ui.test.ts`; all passed in the sequential run above. The remaining 13 failures matched previously recorded path, macOS shortcut/focus, early-restart, extension-reload, and file-manager signatures. No unrelated fixes or pristine-upstream comparison were performed. The full run began before the Victor checkpoint compatibility fix; the final focused configuration, attribution, and controller run passed all 148 tests, including the new checkpoint/restart and long-wait cases.

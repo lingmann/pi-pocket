@@ -6,7 +6,6 @@
  * What people ask of Pi lives in `commands.ts`, the people's side of a session in `collab.ts`, push notifications in
  * `alerts.ts`, provider sign-ins in `providers.ts`, and each conversation's shared live view in `room.ts`.
  */
-import { rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -33,6 +32,7 @@ import {
     type HarnessSettings,
     LiveDoc,
     type LiveState,
+    ProviderDoc,
     type Registry,
     type Storage,
     UsageDoc,
@@ -97,6 +97,7 @@ import { snippet } from "./projection.ts";
 import { loadPromptTemplates, type PromptTemplate, type SkillCommand } from "./prompts.ts";
 import { BASE_THEME, Themes } from "./themes.ts";
 import { THEME_ID } from "./themes/format.ts";
+import { LimitGate, type LimitTuning } from "./limit-gate.ts";
 import { measureModelStreams } from "./timing.ts";
 import { Providers } from "./providers.ts";
 import { PushStore } from "./push.ts";
@@ -141,6 +142,8 @@ const BROWSER_EXTENSION = "pocket-browser";
 const PIP_FILE = "pip.ts";
 /** The extension module with the subagent tool, rebuilt when the models subagents may use change. */
 const SUBAGENTS_FILE = "subagents.ts";
+/** The hours a run may wait for a provider's limit, as the owner may choose them (0: not at all). */
+const LIMIT_WAIT_CHOICES = [0, 1, 6, 12, 24];
 /** The most models the owner may allow subagents. */
 const MAX_SUBAGENT_MODELS = 50;
 
@@ -247,6 +250,8 @@ export interface OpenOptions {
     log?: (line: string) => void;
     /** Tests register scripted providers here. */
     configureModels?: (models: ModelRuntime) => void;
+    /** Tests shorten the limit gate's waits (`limit-gate.ts`). */
+    limits?: Partial<LimitTuning>;
     /** The clock durable work runs by, such as scheduled messages. Tests move it ahead. */
     now?: () => number;
     /** The browser to run for the Browser panel and tool; null for none. Undefined finds one on this machine. */
@@ -277,6 +282,8 @@ export class PocketApp {
     readonly collab = new Collab(this);
     readonly alerts = new Alerts(this);
     readonly providers = new Providers(this);
+    /** Model requests that hit a limit wait for it to clear, then go on (`limit-gate.ts`). */
+    readonly limits: LimitGate;
     readonly schedules = new Schedules(this);
     readonly goals = new Goals(this);
     readonly shell = new Shell(this);
@@ -345,6 +352,8 @@ export class PocketApp {
     #unsubscribeApprovals: (() => void) | undefined;
     #unsubscribeBrowsers: (() => void) | undefined;
     #lockFile: string;
+    #releaseLock: (() => void) | undefined;
+    #openingStorage: Storage | undefined;
     #closing: Promise<void> | undefined;
     readonly #log: (line: string) => void;
     readonly #configureModels: ((models: ModelRuntime) => void) | undefined;
@@ -369,6 +378,16 @@ export class PocketApp {
         this.config = new ConfigStore(options.dataDir);
         this.#lockFile = join(options.dataDir, "harness.lock");
         this.#log = options.log ?? ((line) => console.log(line));
+        this.limits = new LimitGate({
+            hours: () => this.config.limitWaitHours,
+            epoch: (provider) => this.providers.signInEpoch(provider),
+            conversationOf: (sessionId) => this.#conversationOfSession(sessionId),
+            changed: () => this.#limitsChanged(),
+            started: (conversationId, view) => this.alerts.limitWait(conversationId, view),
+            log: (line) => this.#log(line),
+            file: join(options.dataDir, "provider-limits.json"),
+            ...(options.limits === undefined ? {} : { tuning: options.limits }),
+        });
         this.browsers = new Browsers({
             dataDir: options.dataDir,
             ...(options.browser === undefined ? {} : { executable: options.browser }),
@@ -567,13 +586,21 @@ export class PocketApp {
     static async open(options: OpenOptions): Promise<PocketApp> {
         const app = new PocketApp(options);
 
-        await app.#open();
+        try {
+            await app.#open();
+        } catch (error) {
+            if (app.#releaseLock !== undefined) {
+                await app.close();
+            }
+
+            throw error;
+        }
 
         return app;
     }
 
     async #open(): Promise<void> {
-        takeLock(this.#lockFile);
+        this.#releaseLock = takeLock(this.#lockFile);
 
         try {
             this.pushStore = new PushStore(this.dataDir);
@@ -597,6 +624,8 @@ export class PocketApp {
         this.providers.modelRefresh.watch(this.models);
         this.#configureModels?.(this.models);
         measureModelStreams(this.models);
+        // Outside the timing wrapper: each attempt is timed on its own, not the wait before it.
+        this.limits.install(this.models);
         await this.models.getAvailable().catch(() => []);
 
         const registry = createRegistry();
@@ -702,6 +731,7 @@ export class PocketApp {
 
         const storage = await openNodeSqliteStorage(join(this.dataDir, "pocket.sqlite"));
 
+        this.#openingStorage = storage;
         this.harness = await Harness.open(
             storage,
             {
@@ -721,6 +751,7 @@ export class PocketApp {
             context,
         );
 
+        this.#openingStorage = undefined;
         const conversations = await this.#recover(storage);
 
         await this.spend.load(conversations);
@@ -791,6 +822,11 @@ export class PocketApp {
 
                 if (live?.run !== undefined) {
                     this.#busy.add(id);
+                }
+
+                // A compaction that resumes asks the model too: it may wait for a limit.
+                if ((live?.compactions?.length ?? 0) > 0) {
+                    this.#compacting.add(id);
                 }
 
                 const agent = await this.harness.snapshot(AgentDoc, id, context);
@@ -915,6 +951,13 @@ export class PocketApp {
 
         if (kind === "pi.live" && id !== undefined) {
             const busy = (change.value as LiveState | null)?.run !== undefined;
+
+            // A compaction asks the model too (an idle session's manual one has no run): it may wait for a limit.
+            if (((change.value as LiveState | null)?.compactions?.length ?? 0) > 0) {
+                this.#compacting.add(id);
+            } else {
+                this.#compacting.delete(id);
+            }
 
             if (busy !== this.#busy.has(id)) {
                 if (busy) {
@@ -1054,6 +1097,8 @@ export class PocketApp {
         const stream = () => this.streamSettings();
 
         return {
+            // A phase can wait for hours without changing state; repeated process kills must not park it.
+            restartLimit: Infinity,
             // Every installed extension, in install order, but PiP's: its tools and prompt are for its conversation only,
             // which selects it by name (`pip.ts`).
             get extensions() {
@@ -1129,6 +1174,50 @@ export class PocketApp {
             if (client.user.role === "owner") {
                 client.send("notice", { level, message });
             }
+        }
+    }
+
+    /** Conversations with a compaction going: its request may wait for a limit too. */
+    readonly #compacting = new Set<ConversationId>();
+
+    /** The conversation whose generation or compaction sends requests under a provider session id: only those wait. */
+    async #conversationOfSession(sessionId: string): Promise<number | undefined> {
+        for (const id of new Set([...this.#busy, ...this.#compacting])) {
+            const mine = await this.harness
+                .snapshot(ProviderDoc, id, context)
+                .catch(() => undefined);
+
+            if (mine?.sessionId === sessionId) {
+                return Number(id);
+            }
+        }
+
+        return undefined;
+    }
+
+    /** Conversations that were in a wait for a limit, or are now: their views and the session list show the change. */
+    #limitWaiting = new Set<number>();
+
+    #limitsChanged(): void {
+        const now = new Set(this.limits.waits().map((wait) => wait.conversationId));
+        const changed = new Set([...this.#limitWaiting, ...now]);
+
+        this.#limitWaiting = now;
+
+        for (const id of changed) {
+            const conversation = id as unknown as ConversationId;
+
+            // A subagent's wait shows in its session's subagents bar too.
+            for (const room of new Set([conversation, this.rootOf(conversation)])) {
+                void this.#rooms.get(room)?.then(
+                    (open) => open.schedule(),
+                    () => {},
+                );
+            }
+        }
+
+        if (changed.size > 0) {
+            this.#scheduleSessions();
         }
     }
 
@@ -1695,6 +1784,9 @@ export class PocketApp {
         }
 
         const sessions = new Map<string, SubagentEntry[]>();
+        const limited = new Map(
+            this.limits.waits().map((wait) => [wait.conversationId, wait.view.until]),
+        );
 
         for (const [parent, { agents, reporting }] of this.#subagents) {
             const session = String(this.rootOf(parent));
@@ -1715,6 +1807,7 @@ export class PocketApp {
                         record,
                         this.#busy.has(record.conversationId),
                         reporting.has(name),
+                        limited.get(Number(record.conversationId)),
                     ),
                     ...(ask === undefined
                         ? {}
@@ -1899,6 +1992,8 @@ export class PocketApp {
                 pip: this.pip.available(user),
                 // Tokens of context above which PiP compacts itself once idle; 0: only as sessions do.
                 pipCompactAt: this.pipCompaction.compactAt,
+                // The most hours a run waits for a provider's limit to clear; 0: it does not wait (`limit-gate.ts`).
+                limitWaitHours: this.config.limitWaitHours,
             },
             // Read after the guard's wait, so a connecting device does not replace a live update with an older list.
             folderFavorites: await this.folderFavorites.list(user),
@@ -1982,6 +2077,14 @@ export class PocketApp {
         );
         const people = new Map<string, Map<string, string>>();
         const subagents = this.#subagentsBySession();
+        // The sessions in a wait for a provider's limit, their subagents' included: when the next request goes out.
+        const limited = new Map<string, number>();
+
+        for (const wait of this.limits.waits()) {
+            const session = String(this.rootOf(wait.conversationId as unknown as ConversationId));
+
+            limited.set(session, Math.min(limited.get(session) ?? Infinity, wait.view.until));
+        }
 
         for (const client of this.#clients) {
             if (client.conversationId === undefined) {
@@ -2035,6 +2138,7 @@ export class PocketApp {
                     ...linkage,
                     busy,
                     waiting: waiting.has(id),
+                    ...(limited.has(id) ? { limited: limited.get(id)! } : {}),
                     ...(endedAt === undefined ? {} : { endedAt }),
                     ...(this.#failed.has(Number(id) as unknown as ConversationId)
                         ? { failed: true }
@@ -2684,6 +2788,38 @@ export class PocketApp {
         );
     }
 
+    /**
+     * The owner chooses how many hours a run waits for a provider's limit to clear, at most; 0 turns waiting off, and
+     * runs that wait now go on at once.
+     */
+    async setLimitWaitHours(user: User, hours: unknown): Promise<void> {
+        if (user.role !== "owner") {
+            throw new HttpError(403, "Only the owner can do that");
+        }
+
+        if (typeof hours !== "number" || !LIMIT_WAIT_CHOICES.includes(hours)) {
+            throw new HttpError(
+                400,
+                `limitWaitHours must be one of ${LIMIT_WAIT_CHOICES.join(", ")}`,
+            );
+        }
+
+        if (hours === this.config.limitWaitHours) {
+            return;
+        }
+
+        this.config.limitWaitHours = hours;
+
+        // Off: the runs that wait go on at once. Another time: each wait is cut to the new longest.
+        if (hours === 0) {
+            this.limits.releaseAll();
+        } else {
+            this.limits.reconsider();
+        }
+
+        await this.#refreshClients();
+    }
+
     /** The owner chooses when PiP compacts itself: above so many tokens of context once idle, or (0) as sessions do. */
     async setPipCompactAt(user: User, tokens: unknown): Promise<void> {
         if (user.role !== "owner") {
@@ -3015,6 +3151,7 @@ export class PocketApp {
             this.alerts.close();
             this.themes.close();
             this.spend.close();
+            this.limits.close();
             this.#unsubscribeCommits?.();
             this.#unsubscribeApprovals?.();
             this.#unsubscribeBrowsers?.();
@@ -3049,10 +3186,17 @@ export class PocketApp {
                 }),
             ]);
             clearTimeout(limit);
+            let storageClosed = false;
 
             try {
                 // Close writes no outcome: running work resumes when the next process opens the storage.
-                await this.harness?.close(context);
+                if (this.harness !== undefined) {
+                    await this.harness.close(context);
+                } else {
+                    await this.#openingStorage?.close(context);
+                }
+
+                storageClosed = true;
 
                 for (const env of this.#envs.values()) {
                     await env.cleanup(context);
@@ -3060,7 +3204,10 @@ export class PocketApp {
             } finally {
                 // After the harness: a browser call cut off by the stop resumes as interrupted, not as failed.
                 await this.browsers.closeAll({ final: true }).catch(() => {});
-                rmSync(this.#lockFile, { force: true });
+
+                if (storageClosed) {
+                    this.#releaseLock?.();
+                }
             }
         })();
 

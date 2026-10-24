@@ -12,6 +12,7 @@ const ReplySettings = defineDoc<{ voiceInstruction?: string }>({
     kind: "x.victor-reply-style.settings",
     version: 1,
     scope: "session",
+    checkpointWhen: (_value, _ops, info) => info.deltasSinceBase >= 64,
     initial: () => ({}),
 });
 

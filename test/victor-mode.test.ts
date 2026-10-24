@@ -1783,6 +1783,39 @@ test("navigation, visibility, connection and permission changes tear down replay
     }
 });
 
+test("a long provider-limit wait keeps one submission and speaks the attributed answer once", async (t) => {
+    const h = await setup(t);
+
+    await h.listen();
+    await h.submit();
+    Object.assign(h.state.view.live, { busy: true, limit: { until: Date.now() + 3_600_000 } });
+    h.changed();
+
+    // LimitGate keeps the same run busy. Each watchdog check must wait, not send again or resume capture.
+    for (let minute = 0; minute < 60; minute++) {
+        t.mock.timers.tick(30000);
+        t.mock.timers.tick(30000);
+        await settle();
+        assert.equal(h.victor.state.phase, "waiting");
+        assert.equal(h.submissions.length, 1);
+        assert.equal(h.worker.all("synthesize").length, 0);
+        assert.ok(h.acquisitions.every(({ stream }) => stream.track.stopped));
+    }
+
+    h.state.view.live = { busy: false };
+    const id = h.reply("The limit cleared.", null);
+
+    assert.equal(h.victor.state.phase, "waiting");
+    h.state.view.authors[id] = "me";
+    h.changed();
+    h.changed();
+    assert.equal(h.worker.all("synthesize").length, 1);
+    assert.equal(h.worker.last("synthesize").text, "The limit cleared.");
+    await h.finish();
+    assert.equal(h.victor.state.phase, "listening");
+    assert.equal(h.submissions.length, 1);
+});
+
 test("a reply is not synthesized until its user entry is attributable to us", async (t) => {
     const h = await setup(t);
 
