@@ -61,6 +61,33 @@ const lookup = Object.assign(defineTool({ … }), { annotations: { readOnlyHint:
 - `api.env` gives the files and the shell of the session's folder. `(await api.agent(context)).cwd` is the folder.
 - `api.snapshot(Doc, api.conversationId, context)` reads a document, for example one of Pi Pocket's in `src/server/docs.ts`.
 
+## Call a model
+
+A tool can ask a model itself, for example to choose each step of a browser run. Use the session's model, through Pi Durable:
+
+```typescript
+if (host.heldBack(api.conversationId) !== undefined) {
+    throw new Error("A spend limit holds this session back.");
+}
+
+const chosen = (await api.agent(context)).model;
+const model = chosen && api.models.getModel(chosen.provider, chosen.modelId);
+
+if (model === undefined) {
+    throw new Error("This session has no model.");
+}
+
+const reply = await api.models.completeSimple(model, {
+    messages: [
+        { role: "user", content: [{ type: "text", text: question }], timestamp: Date.now() },
+    ],
+});
+```
+
+- The provider's request limits apply, as to Pi's own requests.
+- The session's spend does not count this reply by itself. Add `reply.usage` to Pi Durable's `UsageDoc` for the session, in a `commit`, as Pi Pocket's titles do ([titles.ts](../../src/server/titles.ts)). Check `host.heldBack` before each call, so a spend limit stops your tool too.
+- Say in your tool's result what the model decided, so Pi and the people can follow it.
+
 ## See also
 
 - [Your first extension](first-extension.md) makes a tool, step by step.

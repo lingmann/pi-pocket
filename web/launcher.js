@@ -33,6 +33,7 @@ import {
     notify,
     openSheet,
     scoped,
+    sessionOrder,
     setUnread,
     signOut,
     store,
@@ -521,9 +522,10 @@ function actionItems() {
 
 function sessionItems() {
     const { sessions, server } = store.state;
-    const order = workspaceOrder();
+    // Every session, folded ones too; the numbers are Alt's, which skip what a fold hides.
+    const order = sessionOrder();
     const archived = sessions.filter((session) => session.archived);
-    const numbers = new Map(order.map((session, index) => [session.id, index]));
+    const numbers = new Map(workspaceOrder().map((session, index) => [session.id, index]));
 
     return [...order, ...archived].map((session) => {
         const number = numbers.get(session.id) ?? -1;

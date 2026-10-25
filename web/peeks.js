@@ -510,6 +510,22 @@ function PeekApproval({ approval, me, rule, whole }) {
 
     const ownCall = rule === "others" && me?.role !== "owner" && approval.requestedBy === me?.id;
 
+    // An extension's question (`host.ask`) is answered on its card, where its fields are: from here, open it or decline.
+    if (approval.form) {
+        return html`<span class="peek-actions">
+            <button class="button small" disabled=${busy} onClick=${() => answer(false)}>
+                Decline
+            </button>
+            <button
+                class="button small primary"
+                title="Answer it where it waits"
+                onClick=${() => navigate(approval.conversationId)}
+            >
+                Open
+            </button>
+        </span>`;
+    }
+
     return html`<span class="peek-actions">
         <button class="button small" disabled=${busy} onClick=${() => answer(false)}>Deny</button>
         ${

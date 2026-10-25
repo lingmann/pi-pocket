@@ -242,6 +242,36 @@ export const ArtifactSharesDoc = defineDoc<{ items: Record<string, ArtifactShare
     initial: () => ({ items: {} }),
 });
 
+/**
+ * A page that an extension module shows to anyone with its address (`/l/<token>`, `public-links.ts`), under a token
+ * that is the whole of the access: no sign-in. The module's own page handler draws it.
+ */
+export type PublicLink = {
+    /** The module that made it, and whose page handler answers it. */
+    module: string;
+    createdAt: number;
+    /** When it closes. A link always closes: at most `MAX_LINK_HOURS` after it was made. */
+    expiresAt: number;
+    /** How many answered posts it takes still; absent: any number until it closes. 0: it has closed. */
+    uses?: number;
+    /** When its last use was claimed: kept a while after, so a page that refuses the post can give the use back. */
+    usedAt?: number;
+    /** Who it was made for (a person's id), and the session it is about, when the module says. */
+    by?: string;
+    conversation?: number;
+    /** The module's own small JSON value. */
+    data?: JsonValue;
+};
+
+/** The public links of the whole app, by their token. */
+export const PublicLinksDoc = defineDoc<{ items: Record<string, PublicLink> }>({
+    kind: "pocket.public-links",
+    version: 1,
+    ...rebased,
+    scope: "session",
+    initial: () => ({ items: {} }),
+});
+
 export type SubagentRecord = {
     conversationId: ConversationId;
     /** Answers already reported to the parent: several messages can end in one answer, reported once. */
@@ -406,7 +436,8 @@ export const TurnsDoc = defineDoc<Turns>({
     initial: () => ({ on: false, asks: [] }),
 });
 
-export type Decision = { allow: boolean; by: string; userId: string; at: number };
+/** `ask`: an extension's question (`host.ask`), answered or declined rather than allowed or denied. Since 0.22.0. */
+export type Decision = { allow: boolean; by: string; userId: string; at: number; ask?: true };
 
 /** Who allowed or denied each tool call Lancet Guard asked about, by tool call id. */
 export const DecisionsDoc = defineDoc<{ calls: Record<string, Decision> }>({

@@ -61,6 +61,8 @@ export const PIP_NAME = "PiP";
  */
 export const PIP_EXTENSIONS = [
     "coding-tools",
+    // Core's own: its hook takes the values extensions hide (`host.hide`) out of PiP's tool results too.
+    "pocket-core",
     PIP_EXTENSION,
     "pocket-artifacts",
     "pocket-schedules",
@@ -359,6 +361,27 @@ export class Pip {
         );
 
         return conversation.id;
+    }
+
+    /**
+     * Give every PiP what this version runs it with, before work resumes: a run or a report that comes before anyone opens
+     * the panel then runs with it too (its hook that hides values, say).
+     */
+    async tuneAll(log: (line: string) => void): Promise<void> {
+        for (const [id, meta] of Object.entries(this.#app.sessionCatalogue())) {
+            if (meta.pip === undefined) {
+                continue;
+            }
+
+            // One that fails is logged, and the others still get theirs.
+            try {
+                await this.#tune(Number(id) as unknown as ConversationId);
+            } catch (error) {
+                log(
+                    `PiP ${id} could not be brought up to date: ${error instanceof Error ? error.message : String(error)}`,
+                );
+            }
+        }
     }
 
     /** Give PiP the extensions and tools this version runs it with, when it has others (made by an older one). */

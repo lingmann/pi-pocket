@@ -39,6 +39,7 @@ import { ExtensionWebs } from "../src/server/extension-web.ts";
 import { PlanDoc, TurnsDoc } from "../src/server/docs.ts";
 import { createHandler } from "../src/server/http.ts";
 import { opened } from "../src/server/http/io.ts";
+import { BUILT_IN_MODULES } from "../src/server/reload.ts";
 
 const dataDir = join(root, "data");
 const dropIns = join(dataDir, "extensions");
@@ -260,8 +261,11 @@ test("a browser module loads for the people it is for, and its folder serves onl
     const soloUrl = ownerUi.find((each) => each.module === "solo")!.url;
 
     // Panel's is for everyone with every session; Solo's for the owner alone.
+    // Built-in modules with browser modules of their own may be on by default: only the drop-ins count.
     assert.deepEqual(
-        (await uiFor("Vic")).map((each) => each.module),
+        (await uiFor("Vic"))
+            .map((each) => each.module)
+            .filter((module) => !BUILT_IN_MODULES.has(module)),
         ["panel"],
     );
     assert.deepEqual(await uiFor("Sid"), []);

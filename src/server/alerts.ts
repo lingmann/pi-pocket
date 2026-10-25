@@ -204,6 +204,26 @@ export class Alerts {
                         continue;
                     }
 
+                    // An ask goes to the person who answers it, and is answered in the app: its fields need typing.
+                    if (approval.form !== undefined) {
+                        if (app.cannotAllow(user, approval) === undefined) {
+                            void this.push(
+                                userId,
+                                approval.conversationId,
+                                "approval",
+                                {
+                                    title: `Pi asks you · ${title}`,
+                                    body: snippet(approval.form.title, 400),
+                                    url: `/s/${String(approval.conversationId)}`,
+                                    tag: `approval-${approval.id}`,
+                                },
+                                "high",
+                            );
+                        }
+
+                        continue;
+                    }
+
                     const message: PushMessage = {
                         title: `Pi needs approval · ${title}`,
                         body: snippet(call, 400),

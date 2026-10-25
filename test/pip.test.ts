@@ -22,14 +22,15 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import type { ConversationId, TaskId } from "@earendil-works/pi-durable";
+import { AgentDoc, type ConversationId, type TaskId } from "@earendil-works/pi-durable";
 import type { User } from "../src/server/config.ts";
 import { AuthorsDoc, type PrWatch, ScheduleDoc, SessionsDoc } from "../src/server/docs.ts";
 import { prWatchLine, repoWatchLine } from "../src/server/extensions/pip.ts";
 import { quoted } from "../src/server/fence.ts";
-import { PIP_EXTENSION, SESSION_CLOSE, SESSION_OPEN } from "../src/server/pip.ts";
+import { PIP_EXTENSION, PIP_EXTENSIONS, SESSION_CLOSE, SESSION_OPEN } from "../src/server/pip.ts";
 
 const tool = (name: string, args: Parameters<typeof fauxToolCall>[1]) =>
     fauxAssistantMessage([fauxToolCall(name, args)], { stopReason: "toolUse" });
@@ -323,6 +324,21 @@ test("a tab's PiP panel gets PiP's view beside its session, and counts as lookin
     await app.setPip(owner(app), tab.client.connection, false);
     assert.ok(!app.watching(owner(app).id, id));
     app.detach(tab.client);
+});
+
+test("a PiP made by an older version runs with this one's extensions from the start", async () => {
+    const id = await pip();
+
+    // As an older version left it: without core's hook, which hides values in PiP's tool results.
+    await app.harness.commit(async (tx) => {
+        const agent = await tx.doc(AgentDoc, id);
+
+        agent.extensions = PIP_EXTENSIONS.filter((name) => name !== "pocket-core");
+    }, BACKGROUND_CONTEXT);
+    await app.close();
+    app = await openApp(model, dataDir);
+    // Nobody has opened the panel yet.
+    assert.deepEqual((await app.agentState(id))?.extensions, PIP_EXTENSIONS);
 });
 
 test("a follow outlives a restart: the report comes once the session's run ends", async () => {

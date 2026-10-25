@@ -1054,7 +1054,7 @@ function ToolStep({
                 class=${`step-decision ${decision.allow ? "allowed" : "denied"}`}
                 title=${new Date(decision.at).toLocaleString()}
             >
-                <${Icon} name="shield" size=${13} /> ${decision.allow ? "Allowed" : "Denied"} by ${decision.by}
+                <${Icon} name="shield" size=${13} /> ${decided(decision)} by ${decision.by}
             </div>`
         }
         ${
@@ -1476,7 +1476,107 @@ function stepLive(step, results, slots, approvals, busy) {
     return status === "running" || status === "approval";
 }
 
+/**
+ * A question for the person Pi works for, from an extension (`host.ask`): its fields, sent only by that person, and
+ * declined by anyone who can steer. What is typed goes to the extension that asked, never to Pi or into the transcript.
+ */
+function AskCard({ approval }) {
+    const { me, users } = store.state;
+    const form = approval.form;
+    const [values, setValues] = useState(() =>
+        Object.fromEntries(form.fields.map((field) => [field.name, ""])),
+    );
+    const [busy, setBusy] = useState(false);
+    const owner = users?.find?.((each) => each.role === "owner")?.id;
+    const mine = (approval.requestedBy ?? owner) === me?.id;
+    const who =
+        users?.find?.((each) => each.id === approval.requestedBy)?.name ??
+        "the person Pi works for";
+    const ready = form.fields.every((field) => values[field.name] !== "");
+
+    const answer = (allow) => {
+        setBusy(true);
+        attempt(() => actions.approve(approval.id, allow, allow ? values : undefined)).finally(() =>
+            setBusy(false),
+        );
+    };
+
+    return html`<form
+        class="approval ask"
+        data-part="approval"
+        onSubmit=${(event) => {
+            event.preventDefault();
+
+            if (mine && ready && !busy) {
+                answer(true);
+            }
+        }}
+    >
+        <div class="approval-head">
+            <span class="approval-shield" aria-hidden="true"><${Icon} name="shield" size=${16} /></span>
+            <div class="approval-title">
+                <span class="approval-ask">${form.title}</span>
+                ${form.text && html`<span class="approval-reason">${form.text}</span>`}
+            </div>
+        </div>
+        ${
+            mine
+                ? html`${form.fields.map(
+                      (field) => html`<label class="ask-field" key=${field.name}>
+                          <span>${field.label}</span>
+                          <input
+                              type=${field.secret ? "password" : "text"}
+                              name=${field.name}
+                              value=${values[field.name]}
+                              placeholder=${field.placeholder ?? ""}
+                              autocomplete=${field.autocomplete ?? "off"}
+                              autocapitalize="off"
+                              spellcheck="false"
+                              disabled=${busy}
+                              onInput=${(event) =>
+                                  setValues({ ...values, [field.name]: event.currentTarget.value })}
+                          />
+                      </label>`,
+                  )}
+                  ${
+                      form.fields.length > 0 &&
+                      html`<div class="muted small">
+                          What you type goes to the page or tool that asked. Pi does not see it.
+                      </div>`
+                  }`
+                : html`<div class="muted small">Waiting for ${who} to answer.</div>`
+        }
+        ${
+            canSteer() &&
+            html`<div class="approval-actions">
+                <button type="button" class="button deny" disabled=${busy} onClick=${() => answer(false)}>
+                    Decline
+                </button>
+                ${
+                    mine &&
+                    html`<button type="submit" class="button primary" disabled=${busy || !ready}>
+                        ${form.submit}
+                    </button>`
+                }
+            </div>`
+        }
+    </form>`;
+}
+
+/** What someone did with a call that waited for them: an ask (`host.ask`) is answered or declined. */
+function decided(decision) {
+    if (decision.ask) {
+        return decision.allow ? "Answered" : "Declined";
+    }
+
+    return decision.allow ? "Allowed" : "Denied";
+}
+
 function ApprovalCard({ approval }) {
+    if (approval.form) {
+        return html`<${AskCard} approval=${approval} />`;
+    }
+
     const { me, server } = store.state;
     const [busy, setBusy] = useState(false);
 
@@ -2300,17 +2400,20 @@ function runStart(conversationId, entries, busy) {
 
 /** Whether this person can answer one of the approvals waiting: one who can steer, and for a call not of their own asking where that needs someone else. */
 function canAnswer(approvals) {
-    const { me, server } = store.state;
+    const { me, server, users } = store.state;
+    const owner = users?.find?.((each) => each.role === "owner")?.id;
 
     return (
         canSteer() &&
-        approvals.some(
-            (approval) =>
-                !(
-                    server?.approvalRule === "others" &&
-                    me?.role !== "owner" &&
-                    approval.requestedBy === me?.id
-                ),
+        approvals.some((approval) =>
+            // An ask (`host.ask`) is for the person Pi works for, or the owner when nobody is known.
+            approval.form
+                ? (approval.requestedBy ?? owner) === me?.id
+                : !(
+                      server?.approvalRule === "others" &&
+                      me?.role !== "owner" &&
+                      approval.requestedBy === me?.id
+                  ),
         )
     );
 }
@@ -2504,7 +2607,16 @@ function LiveLine({ live, approvals, start, entries, conversationId }) {
     let state;
 
     if (waiting) {
-        state = canAnswer(approvals) ? "Waiting for your approval" : "Waiting for approval";
+        // Questions from extensions (`host.ask`) wait for an answer, not an approval.
+        const asks = approvals.every((approval) => approval.form);
+
+        state = canAnswer(approvals)
+            ? asks
+                ? "Waiting for your answer"
+                : "Waiting for your approval"
+            : asks
+              ? "Waiting for an answer"
+              : "Waiting for approval";
     } else if (limit) {
         state = `Waiting for ${limitWho(limit)}`;
     } else if (retry) {

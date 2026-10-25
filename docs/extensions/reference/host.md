@@ -192,6 +192,85 @@ Since 0.12.0 · Stable
 
 Calls `listener` each time the owner changes a spend limit. It returns a function: call it to stop.
 
+## Events
+
+### `on`
+
+```ts
+on<E extends AppEventName>(event: E, listener: (data: AppEvents[E]) => unknown): () => void;
+```
+
+Since 0.22.0 · Experimental
+
+Calls `listener` each time something happens in the app: a session is made, renamed, or archived, a person sends Pi a message, or Pi starts or stops working. Each event comes after the change is stored. A listener runs after the work that caused it, never in its way: one that throws or rejects is logged, and the other listeners still run. Each one gets its own frozen copy of the data. It returns how to stop: pass that to `web.onDispose`. PiP's conversation is its person's alone, and sends no events. An unknown event name throws. See [`AppEvents`](#appevents).
+
+```typescript
+web.onDispose(
+    host.on("run.ended", ({ conversationId, session }) => {
+        if (conversationId === session) {
+            counts.set(session, (counts.get(session) ?? 0) + 1);
+        }
+    }),
+);
+```
+
+## Asking people, hiding values, and the browser
+
+These came in 0.22.0, and are experimental. [People's values and the browser](../people-values.md) tells how to use them together.
+
+### `ask`
+
+```ts
+ask(request: AskRequest, context: Context): Promise<AskAnswer>;
+```
+
+Since 0.22.0 · Experimental
+
+Asks the person Pi works for, on a card in the session, as an approval asks. The card shows the request's `title`, its `text`, a field for each of its `fields` (a hidden one for a `secret`), and a button. Only the person Pi works for can send it (the owner, when nobody is known); anyone who can steer can decline it. It notifies that person, as an approval does.
+
+What they type comes back in the answer's `values`, and nowhere else: not to Pi, into the transcript, or to the other people in the session. A plain Allow, such as from a notification, is refused: each field must be filled in. Do not keep the values in a memo or a document, where a restart would find them. Without a memo, a call that a restart cut off comes back as interrupted, and asks again when Pi tries again. See [`AskRequest`](#askrequest) and [`AskAnswer`](#askanswer).
+
+### `hide`
+
+```ts
+hide(value: HiddenValue): () => void;
+```
+
+Since 0.22.0 · Experimental
+
+Hides a value from what Pi and people read, until the returned function is called. Each one becomes `[label]`:
+
+- in the output of commands as it streams: bash's live output and its result, a `!` command's card, and a check's output. A value split across two chunks is held back until it can be told apart, so up to its length less one character comes later than the rest;
+- in every tool's result (what the model reads, what programs read, and its details, keys too), before it is stored;
+- in people's messages to Pi, the files a message brings along, and an edit sent again: a value pasted there is replaced before the message is stored, sent to the model, or made the session's title. A `!` command that holds one is refused, since it runs as stored.
+
+With `conversationId`, it is hidden in that session and its subagents. A guess that matches shows as `[label]`, so hide only a value that cannot be guessed, never a short code.
+
+It does not reach a file that a command writes (such as bash's spill file for long output), entries from before the value was hidden, or a value that a command changed (encoded, reversed). Hide each form that you expect, such as its base64, as a value of its own. It keeps values out of transcripts by accident: it is not a boundary against a command that leaks a value on purpose. Pass the returned function to `web.onDispose`. See [`HiddenValue`](#hiddenvalue).
+
+### `commandEnv`
+
+```ts
+commandEnv(provider: CommandEnvProvider): () => void;
+```
+
+Since 0.22.0 · Experimental
+
+Adds environment variables to the commands that run in sessions: Pi's bash, people's `!` commands, and Done when's checks. Before each command, each provider gets the command, its folder, and its session, and gives variables to add, or nothing. A later provider's variable wins over an earlier one's. A provider that throws, or takes more than 5 seconds, adds nothing, and the server's log says why; the command still runs. Use it to put a value into `$NAME` for the commands that name it, so the value does not go through Pi. Hide the value with `hide` too. Pass the returned function to `web.onDispose`. See [`CommandEnvProvider`](#commandenvprovider).
+
+### `browser`
+
+```ts
+browser(
+    conversationId: ConversationId,
+    options?: { open?: boolean },
+): Promise<BrowserPageHandle | undefined>;
+```
+
+Since 0.22.0 · Experimental
+
+A session's browser page: the one that Pi's `browser` tool and the people in the session use. With `open: true`, it opens the page when it is not open. It is `undefined` while the Browser module is off, and without `open`, when no page is open. See [`BrowserPageHandle`](#browserpagehandle).
+
 ## Notices and text
 
 ### `notice`
@@ -370,6 +449,229 @@ A linked session, as `list` gives it.
 
 - `address`: the address that the asking session uses for it. It is never the session's id.
 - `title`, `cwd` (its folder), `busy` (Pi works in it now), and `archived`: these are there only when all the people who see the asking session see this session too.
+
+## Types for events
+
+### `AppEvents`
+
+```ts
+interface AppEvents {
+    "session.created": {
+        conversationId: number;
+        cwd: string;
+        createdBy?: string;
+        forkedFrom?: number;
+        linkedFrom?: number;
+    };
+    "session.renamed": { conversationId: number; title: string };
+    "session.archived": { conversationId: number; archived: boolean };
+    "message.sent": {
+        conversationId: number;
+        by: string;
+        submissionId: string;
+        text: string;
+        via?: string;
+    };
+    "run.started": { conversationId: number; session: number };
+    "run.ended": { conversationId: number; session: number };
+}
+```
+
+Since 0.22.0 · Experimental
+
+What each event's listener gets.
+
+- `session.created`: a session in the list was made, by a person, a fork (`forkedFrom`), a linked start (`linkedFrom`), or a resend. `createdBy` is a person's id. Subagents are not sessions in the list, and send none.
+- `session.renamed`, `session.archived`: its new title, or whether it is archived now.
+- `message.sent`: a person's message to Pi, a steer or a queued one too. `by` is their id. `text` is the words as stored, with values that extensions hide already hidden and attachments left out. `via` names what sent it for them, such as PiP or a schedule.
+- `run.started`, `run.ended`: Pi started or stopped working in a conversation. `conversationId` is that conversation, a session's or a subagent's; `session` is the session it belongs to.
+
+### `AppEventName`
+
+```ts
+type AppEventName = keyof AppEvents;
+```
+
+Since 0.22.0 · Experimental
+
+The name of an event: `"session.created"`, `"session.renamed"`, `"session.archived"`, `"message.sent"`, `"run.started"`, or `"run.ended"`.
+
+## Types for asking, hiding, and the browser
+
+### `AskRequest`
+
+```ts
+interface AskRequest {
+    readonly conversationId: ConversationId;
+    readonly id: string;
+    readonly taskId: TaskId;
+    readonly callId?: string;
+    readonly title: string;
+    readonly text?: string;
+    readonly fields?: readonly AskField[];
+    readonly submit?: string;
+}
+```
+
+Since 0.22.0 · Experimental
+
+- `id`: unique while the card waits, and the same when the call asks again, such as `${api.taskId}:${api.callId}`. A new ask with the id of one that waits replaces it, and the one before is declined.
+- `taskId`, `callId`: the call that asks, so the card and its answer show with it.
+- `title`: one line, up to 120 characters. `text`: up to 2000.
+- `fields`: up to 6. None makes a question that the button alone answers, such as "Solve the CAPTCHA in the browser, then tap Done".
+- `submit`: the button's words, up to 30 characters. "Send" by default, "Done" with no fields.
+
+### `AskField`
+
+```ts
+interface AskField {
+    name: string;
+    label: string;
+    secret?: boolean;
+    placeholder?: string;
+    autocomplete?: string;
+}
+```
+
+Since 0.22.0 · Experimental
+
+- `name`: the value's key in the answer: letters, digits, and `_`, up to 40, starting with a letter. Each field's is its own.
+- `label`: what the card says above the field.
+- `secret`: a hidden input, as for a password.
+- `autocomplete`: a hint for the browser and the phone's keyboard, such as `username`, `current-password`, or `one-time-code`.
+
+### `AskAnswer`
+
+```ts
+type AskAnswer =
+    | {
+          readonly answered: true;
+          readonly by: string;
+          readonly values: Readonly<Record<string, string>>;
+      }
+    | { readonly answered: false; readonly by: string };
+```
+
+Since 0.22.0 · Experimental
+
+What the person did. `by` is the name of who answered or declined. Each value is 1 to 4096 characters.
+
+### `HiddenValue`
+
+```ts
+interface HiddenValue {
+    value: string;
+    label: string;
+    conversationId?: number;
+}
+```
+
+Since 0.22.0 · Experimental
+
+- `value`: 4 to 4096 characters. A shorter one would turn up in ordinary output by chance. 2000 values at most are hidden at once.
+- `label`: what shows in its place, as `[label]`, such as `[secret GITHUB_TOKEN]`: 1 to 60 letters, digits, spaces, and `_ . : -`.
+- `conversationId`: only in this session. Without it, in every session.
+
+### `CommandRun`
+
+```ts
+interface CommandRun {
+    readonly conversationId: number;
+    readonly command: string | readonly string[];
+    readonly cwd: string;
+}
+```
+
+Since 0.22.0 · Experimental
+
+A command about to run: its session, the command as the shell gets it (or a program and its arguments), and its folder.
+
+### `CommandEnvProvider`
+
+```ts
+type CommandEnvProvider = (
+    run: CommandRun,
+) => Record<string, string> | undefined | Promise<Record<string, string> | undefined>;
+```
+
+Since 0.22.0 · Experimental
+
+Gives the variables to add to one command. A name is letters, digits, and `_`, not starting with a digit; a value has no NUL. A variable that breaks these is left out. The variables of all providers for one command are 256 KB at most.
+
+### `BrowserTarget`
+
+```ts
+interface BrowserTarget {
+    readonly ref?: string;
+    readonly selector?: string;
+    readonly label?: string;
+    readonly x?: number;
+    readonly y?: number;
+}
+```
+
+Since 0.22.0 · Experimental
+
+What to act on: a ref from the last snapshot (`e12`), a CSS selector, the visible text or label of an element, or a point in CSS pixels of the viewport.
+
+### `BrowserControl`
+
+```ts
+interface BrowserControl {
+    ref: string;
+    role: string;
+    name: string;
+    kind: string;
+    disabled: boolean;
+    inView: boolean;
+    value?: string;
+    placeholder?: string;
+    checked?: boolean;
+    options?: string[];
+    href?: string;
+}
+```
+
+Since 0.22.0 · Experimental
+
+One control of a snapshot, as data, up to 500 of them.
+
+- `role`: `button`, `link`, `textbox`, `checkbox`, `combobox`, and so on, or `clickable` for an element that only looks clickable.
+- `kind`: an input's type (`text`, `password`, `email`, and so on), `textarea`, `select`, or the element's tag.
+- `value`: a field's or a select's value. A password field's is `••••` when it holds one, and never its value.
+- `options`: a select's options, up to 50. `href`: a link's address.
+
+### `BrowserPageHandle`
+
+```ts
+interface BrowserPageHandle {
+    readonly url: string;
+    readonly title: string;
+    snapshot(): Promise<{ text: string; controls: BrowserControl[]; truncated: boolean }>;
+    inspect(
+        target: BrowserTarget,
+    ): Promise<{ label: string; kind: string; editable: boolean; password: boolean }>;
+    navigate(url: string): Promise<void>;
+    click(target: BrowserTarget): Promise<{ label: string; navigated: boolean }>;
+    type(target: BrowserTarget, text: string, options?: { submit?: boolean }): Promise<string>;
+    fill(target: BrowserTarget, value: string): Promise<string>;
+    select(target: BrowserTarget, value: string): Promise<string>;
+    press(key: string): Promise<void>;
+    scroll(target?: BrowserTarget, dy?: number): Promise<string>;
+    waitFor(options: { text?: string; selector?: string; timeoutMs?: number }): Promise<boolean>;
+}
+```
+
+Since 0.22.0 · Experimental
+
+The page, with what Pi's `browser` tool does, but no script to run in it.
+
+- `snapshot`: the page as Pi reads it (`text`), and its controls as data. Refs last until the next snapshot, Pi's too.
+- `inspect`: what a target is, scrolled into view: its description, its `kind`, and whether it is a field (`editable`) or a password field.
+- `fill`: puts a person's value into a field (not a select), replacing what it holds. The target is a ref, a selector, or a label, not a point. It throws and fills nothing when something covers the field, or when the focus does not reach it. The value is not in what it returns, and the snapshot shows a password field's as `••••`. Pi can still read a field's value with its `evaluate`: hide the value with `hide` too.
+- `inspect` with a point (`x`, `y`) says what is at that point, without scrolling or acting on it.
+- `type`, `click`, `select`, `press`, `scroll`, `waitFor`, `navigate`: as the `browser` tool's actions. `navigate` takes an http(s) address, host:port, or a file path.
+- What they return: `type`, `select`, and `scroll` give the description of what they acted on; `click` gives it with whether the page went elsewhere (`navigated`); `waitFor` gives whether what it waited for showed; `navigate` and `press` give nothing.
 
 ## Internal members
 

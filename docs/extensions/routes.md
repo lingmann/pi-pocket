@@ -77,7 +77,7 @@ Use an ordinary owner-only `web.route` for an app-wide catalog save. Its documen
 
 The app checks each request before your route gets it:
 
-- The person must be signed in.
+- The person must be signed in. For a page that people with no account open, use a [public page](public-pages.md).
 - The request must have the `X-Pocket` header. A link or a form on another site cannot send it. Your routes need it for `GET` too, so no other site can make a `GET` to them. `pocket.api` always sends it. Anything else that calls your routes must send it too, for example `curl -H 'X-Pocket: 1'`. Without the header, Pi Pocket looks up nothing.
 
 ## Text from outside

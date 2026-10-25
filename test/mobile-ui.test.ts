@@ -215,6 +215,19 @@ async function openWithRows(count: number): Promise<void> {
     `);
 }
 
+test("the served SVG icon decodes as an image", real, async () => {
+    const [width, height] = await inPage<[number, number]>(`
+        const image = new Image();
+
+        image.src = "/icon.svg";
+        await image.decode();
+
+        return JSON.stringify([image.naturalWidth, image.naturalHeight]);
+    `);
+
+    assert.ok(width > 0 && height > 0, "the icon has image dimensions");
+});
+
 test("back closes the open file, then the Files tile, then leaves the session", real, async () => {
     await fresh();
     await tap(row(first));

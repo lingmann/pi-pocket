@@ -94,6 +94,86 @@ Adds the command `/name` to the message box, for the people who can run it. The 
 - [Command context](command-context.md) gives the fields of `command` and what its handler gets and returns.
 - [Slash commands](../commands.md) tells you who can run a command, how a run is kept, and how a person stops it.
 
+### `publicPage`
+
+```ts
+publicPage(handle: PublicPageHandler): void;
+```
+
+Since 0.22.0 · Experimental
+
+Draws the module's public pages: what anyone with one of its links sees at `/l/<token>`, with no sign-in. A module has one handler. Pi Pocket sends each page in a sandbox: no script, an opaque origin, and forms that post only to this server. See [`PublicPageHandler`](#publicpagehandler) and [Public pages](../public-pages.md).
+
+### `links`
+
+```ts
+readonly links: PublicLinks;
+```
+
+Since 0.22.0 · Experimental
+
+Makes, lists, and ends the module's public links. Unlike the registering calls, it works while the module runs: from a route, a tool, a timer, or the page handler. A version of the module that went makes, lists, and ends none. See [`PublicLinks`](#publiclinks).
+
+### `provide`
+
+```ts
+provide(service: object): void;
+```
+
+Since 0.22.0 · Experimental
+
+Offers other modules an object of this module's own: functions and values that they call with `web.use(module)`. A module provides one service, while it loads. When this version of the module goes (an edit, or the owner turns it off), its service goes too, and modules that listen with `onService` hear it. A service is what it says it is: it runs with the providing module's code, so check what other modules give it, as you check what a person gives a route. See [Extensions that work together](../services-settings.md#services).
+
+### `use`
+
+```ts
+use(module: string): unknown;
+```
+
+Since 0.22.0 · Experimental
+
+The service that a module offers now, by the module's name, or `undefined` while that module is off, still loading, or offers none. Ask again each time that you need it, and do not keep it: a reload replaces it. Check its shape before you call it, since another version of the module may offer another one.
+
+### `onService`
+
+```ts
+onService(module: string, listener: () => void): () => void;
+```
+
+Since 0.22.0 · Experimental
+
+Calls `listener` when a module's service comes, changes (the module loads again), or goes. It does not call for a service that is there when you start to listen: check `use` then too. Use it to show or hide what you add to the app that needs that service. It returns how to stop. It stops by itself when this version of your module goes.
+
+### `settings`
+
+```ts
+settings(fields: readonly SettingField[]): void;
+```
+
+Since 0.22.0 · Experimental
+
+Declares the module's settings, while it loads. Core keeps the owner's values in `config.json`, shows them in Menu → Extensions under the module, and checks each value against its field before it keeps it. A mistake in `fields` throws, so the module does not load and the Extensions sheet says why. See [`SettingField`](#settingfield) and [Extensions that work together](../services-settings.md#settings).
+
+### `setting`
+
+```ts
+setting(name: string): SettingValue | undefined;
+```
+
+Since 0.22.0 · Experimental
+
+A setting's value now: the owner's, or the field's default, or `undefined` when it has neither. A value that no longer fits the field, from an older version of the module, gives the default. A name the module did not declare throws. Read it when you need it: the owner can change it at any time.
+
+### `onSettings`
+
+```ts
+onSettings(listener: () => void): () => void;
+```
+
+Since 0.22.0 · Experimental
+
+Calls `listener` after the owner changes the module's settings. The module's tabs hear it too, with `pocket.onSettings`. It returns how to stop, and stops by itself when this version of the module goes.
+
 ## Sending and answering
 
 ### `send`
@@ -253,6 +333,178 @@ interface HumanLinkedSession extends LinkedSession {
 Since 0.16.0 · Stable
 
 `conversationId` is visible to the authenticated person and can be passed to `pocket.openConversation`. `address` remains the source's opaque address. `title`, `cwd`, `busy`, and `archived` still show only when the source's whole audience sees this session.
+
+### `SettingField`
+
+```ts
+type SettingField =
+    | { name: string; label: string; description?: string; type: "boolean"; default?: boolean }
+    | {
+          name: string;
+          label: string;
+          description?: string;
+          type: "text";
+          default?: string;
+          placeholder?: string;
+          secret?: boolean;
+      }
+    | {
+          name: string;
+          label: string;
+          description?: string;
+          type: "number";
+          default?: number;
+          min?: number;
+          max?: number;
+      }
+    | {
+          name: string;
+          label: string;
+          description?: string;
+          type: "choice";
+          default?: string;
+          choices: { value: string; label: string }[];
+      };
+```
+
+Since 0.22.0 · Experimental
+
+One setting.
+
+- `name`: its key: letters, digits, and `_`, up to 40, starting with a letter. Each setting's is its own.
+- `label`: what the Extensions sheet calls it, one line of up to 80 characters. `description`: a line of up to 300 under it.
+- `type`: `boolean` (a switch), `text` (up to 4096 characters), `number` (with `min` and `max`; `min` is not more than `max`, and a `default` is between them), or `choice` (one of `choices`, up to 50).
+- `secret` (text only; on another type it throws): the value never leaves the server, nor does its `default`. The sheet shows only that it is set, and `pocket.settings` leaves both out. Use it for a key or a token.
+- `default`: the value until the owner sets one, and again after **Default** or **Clear**.
+
+A module declares 30 settings at most.
+
+### `SettingValue`
+
+```ts
+type SettingValue = string | number | boolean;
+```
+
+Since 0.22.0 · Experimental
+
+A setting's value: `true` or `false`, text, a number, or a choice's `value`.
+
+### `PublicPageHandler`
+
+```ts
+type PublicPageHandler = (
+    request: PublicPageRequest,
+) => PublicPageAnswer | Promise<PublicPageAnswer>;
+```
+
+Since 0.22.0 · Experimental
+
+Draws a public page. A `POST` to a link with `uses` counts one before the handler runs. A handler that throws, or answers with a status of 400 or more, gives it back.
+
+### `PublicPageAnswer`
+
+```ts
+type PublicPageAnswer = string | { html: string; status?: number };
+```
+
+Since 0.22.0 · Experimental
+
+The page's HTML, or its HTML with a status from 200 to 599 (200 when not given), up to a [size](limits.md#public-links). An error made with `web.error` shows a short page with its message and status. Any other error shows a page that gives no reason, and the server's log has its words.
+
+### `PublicPageRequest`
+
+```ts
+interface PublicPageRequest {
+    readonly method: "GET" | "POST";
+    readonly link: PublicLinkInfo;
+    readonly query: URLSearchParams;
+    readonly form: Readonly<Record<string, string>>;
+    readonly signal: AbortSignal;
+    readonly context: Context;
+    readonly snapshot: DocumentReader["snapshot"];
+    commit<T>(change: (tx: Tx) => T | Promise<T>): Promise<T>;
+}
+```
+
+Since 0.22.0 · Experimental
+
+A request to a public page, from anyone with its address. It has no person.
+
+- `method`: `"GET"` to show the page (`HEAD` comes as `"GET"`), `"POST"` for a form on it.
+- `link`: the link that the address names. It is still open.
+- `query`: the query string.
+- `form`: the fields of a posted form, `application/x-www-form-urlencoded`, as text. The last of a name that comes twice counts. Empty for `GET`.
+- `signal`: aborted when the browser stops waiting.
+- `snapshot`, `context`, and `commit`: read and change the module's own documents. They end when the handler returns.
+
+### `PublicLinks`
+
+```ts
+interface PublicLinks {
+    create(link: PublicLinkRequest): Promise<PublicLinkInfo>;
+    get(token: string): Promise<PublicLinkInfo | undefined>;
+    list(): Promise<PublicLinkInfo[]>;
+    end(token: string): Promise<boolean>;
+}
+```
+
+Since 0.22.0 · Experimental
+
+The module's public links. Each method sees only the links of its own module.
+
+- `create`: makes a link. A request out of its [limits](limits.md#public-links) throws.
+- `get`: one of the module's open links, or `undefined`.
+- `list`: the module's open links, newest first.
+- `end`: ends a link at once, and gives whether there was one to end.
+
+### `PublicLinkRequest`
+
+```ts
+interface PublicLinkRequest {
+    hours: number;
+    uses?: number;
+    by?: string;
+    conversation?: number;
+    data?: unknown;
+}
+```
+
+Since 0.22.0 · Experimental
+
+What a module asks for when it makes a link.
+
+- `hours`: how long it stays open: more than 0, and 720 (30 days) at most.
+- `uses`: how many answered posts it takes before it closes. Without it, any number until its time.
+- `by`: who it is for, such as a route's `user.id`.
+- `conversation`: the session that it is about.
+- `data`: a small JSON value of the module's own, given back with the link.
+
+### `PublicLinkInfo`
+
+```ts
+interface PublicLinkInfo {
+    readonly token: string;
+    readonly path: string;
+    readonly url: string | null;
+    readonly createdAt: number;
+    readonly expiresAt: number;
+    readonly uses: number | null;
+    readonly by: string | null;
+    readonly conversation: number | null;
+    readonly data: unknown;
+}
+```
+
+Since 0.22.0 · Experimental
+
+A link, as its module sees it.
+
+- `token`: 32 hex characters, the whole of its access.
+- `path`: `/l/<token>`.
+- `url`: the whole address on the server's public one (a tunnel's), or `null`. In the browser, use `location.origin` and `path` when it is `null`.
+- `createdAt`, `expiresAt`: when it was made and when it closes, in milliseconds since 1970.
+- `uses`: how many answers it takes still, or `null` for any number.
+- `by`, `conversation`, `data`: as the module gave them, or `null`.
 
 ### `WebMethod`
 

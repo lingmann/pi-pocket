@@ -420,6 +420,7 @@ class Harness {
     preserved: string[] = [];
     consumed = 0;
     deliveryWait: ReturnType<typeof deferred<void>> | null = null;
+    deliveryResult: { acceptedText?: unknown } | undefined;
     blocked = false;
     requestId = 0;
     startup: string[] = [];
@@ -448,6 +449,8 @@ class Harness {
         assert.equal(body.source, "victor", "every Victor submission tags its input source");
         this.submissions.push({ path, body });
         await this.deliveryWait?.promise;
+
+        return this.deliveryResult;
     }
 
     changed() {
@@ -512,7 +515,11 @@ class Harness {
         assert.equal(this.victor.state.phase, "waiting");
     }
 
-    reply(text = "Hello from Pi", author: string | null = "me") {
+    reply(
+        text = "Hello from Pi",
+        author: string | null = "me",
+        submittedText = this.submissions.at(-1)!.body.text,
+    ) {
         const { view } = this.state;
         const id = (view.order.at(-1) ?? 0) + 1;
 
@@ -520,7 +527,7 @@ class Harness {
         view.entries.set(id, {
             id,
             kind: "user",
-            text: this.submissions.at(-1)!.body.text,
+            text: submittedText,
         });
         view.entries.set(id + 1, { id: id + 1, kind: "assistant", text, stopReason: "stop" });
 
@@ -1830,6 +1837,132 @@ test("a reply is not synthesized until its user entry is attributable to us", as
     assert.equal(h.worker.last("synthesize").text, "Attributed answer");
     h.changed();
     assert.equal(h.worker.all("synthesize").length, 1);
+});
+
+test("server-redacted text stays attributable before or after the submit response", async (t) => {
+    for (const early of [false, true]) {
+        await t.test(`reply before response: ${early}`, async (t) => {
+            const h = await setup(t);
+            const redacted = "Use [secret TOKEN]";
+
+            h.deliveryResult = { acceptedText: redacted };
+            await h.listen();
+
+            if (early) {
+                h.deliveryWait = deferred<void>();
+                h.partial("Use private-token send it");
+                h.capture.emit({ type: "flushed" });
+                h.worker.emit({
+                    type: "final",
+                    turn: h.worker.turn,
+                    text: "Use private-token send it",
+                });
+            } else {
+                await h.submit("Use private-token");
+            }
+
+            const id = h.reply("Redacted answer", null, redacted);
+
+            assert.equal(h.worker.all("synthesize").length, 0);
+
+            if (early) {
+                assert.equal(h.victor.state.phase, "submitting");
+                h.deliveryWait!.resolve();
+                await settle();
+            }
+
+            assert.equal(h.victor.state.phase, "waiting");
+            h.state.view.authors[id] = "me";
+            h.changed();
+            h.changed();
+            assert.equal(h.worker.all("synthesize").length, 1);
+            assert.equal(h.worker.last("synthesize").text, "Redacted answer");
+            await h.finish();
+            assert.equal(h.victor.state.phase, "listening");
+            assert.equal(h.submissions.length, 1);
+        });
+    }
+});
+
+test("server text does not bypass competing-message or exact-text checks", async (t) => {
+    for (const other of [false, true]) {
+        await t.test(`different author: ${other}`, async (t) => {
+            const h = await setup(t);
+
+            h.deliveryResult = { acceptedText: "Use [secret TOKEN]" };
+            await h.listen();
+            await h.submit("Use private-token");
+            h.reply(
+                "Not ours",
+                other ? "someone-else" : "me",
+                other ? "Use [secret TOKEN]" : "Different text",
+            );
+            assert.equal(h.victor.state.phase, "off");
+            assert.equal(h.worker.all("synthesize").length, 0);
+            assert.deepEqual(h.preserved, []);
+            await h.released();
+        });
+    }
+});
+
+test("competing exchanges stop Victor even before its redaction response arrives", async (t) => {
+    for (const change of ["author", "multiple", "reset"] as const) {
+        await t.test(change, async (t) => {
+            const h = await setup(t);
+
+            h.deliveryResult = { acceptedText: "Use [secret TOKEN]" };
+            h.deliveryWait = deferred<void>();
+            await h.listen();
+            h.partial("Use private-token send it");
+            h.capture.emit({ type: "flushed" });
+            h.worker.emit({
+                type: "final",
+                turn: h.worker.turn,
+                text: "Use private-token send it",
+            });
+
+            if (change === "author") {
+                h.reply("Not ours", "someone-else", "Use [secret TOKEN]");
+            } else {
+                h.reply("First answer", "me", "Use [secret TOKEN]");
+                const id = h.state.view.order.at(-1)! + 1;
+
+                h.state.view.order.push(id);
+                h.state.view.entries.set(id, {
+                    id,
+                    kind: change === "reset" ? "reset" : "user",
+                    text: "Another exchange",
+                });
+                h.changed();
+            }
+
+            assert.equal(h.victor.state.phase, "off");
+            h.deliveryWait.resolve();
+            await settle();
+            assert.equal(h.victor.state.phase, "off");
+            assert.equal(h.worker.all("synthesize").length, 0);
+            await h.released();
+        });
+    }
+});
+
+test("a late redaction response cannot restart Victor after it stops", async (t) => {
+    const h = await setup(t);
+
+    h.deliveryResult = { acceptedText: "Use [secret TOKEN]" };
+    h.deliveryWait = deferred<void>();
+    await h.listen();
+    h.partial("Use private-token send it");
+    h.capture.emit({ type: "flushed" });
+    h.worker.emit({ type: "final", turn: h.worker.turn, text: "Use private-token send it" });
+    h.victor.disable();
+    h.reply("Late answer", "me", "Use [secret TOKEN]");
+    h.deliveryWait.resolve();
+    await settle();
+    assert.equal(h.victor.state.phase, "off");
+    assert.equal(h.worker.all("synthesize").length, 0);
+    assert.deepEqual(h.preserved, []);
+    await h.released();
 });
 
 test("another person's matching message cannot own this reply", async (t) => {

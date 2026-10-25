@@ -372,7 +372,9 @@ test("PiP compacts itself once idle above its threshold; not below it, nor when 
     const id = await pip();
     const count = async () => (await placed(id)).length;
 
-    assert.equal(app.pipCompaction.compactAt, PIP_COMPACT_DEFAULT);
+    // As sessions do, unless the owner chose a limit.
+    assert.equal(PIP_COMPACT_DEFAULT, 0);
+    assert.equal(app.pipCompaction.compactAt, 0);
     // Well above: everything a summary keeps as it is, and then some.
     const long = `Here is the plan in full: ${"step by step, ".repeat(2000)}`;
 

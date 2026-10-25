@@ -84,6 +84,11 @@ interface PocketConfig {
     subagentModels?: string[];
     /** The most hours a run waits for a model's limit to clear (`limit-gate.ts`); 0: it does not wait. Absent: 6. */
     limitWaitHours?: number;
+    /**
+     * The owner's values for the settings extension modules declare (`web.settings`), by module and setting name. A
+     * setting with no value here has its default. Since 0.22.0; an older Pi Pocket ignores it.
+     */
+    extensionSettings?: Record<string, Record<string, string | number | boolean>>;
 }
 
 /** The hours a run waits for a model's limit to clear, until the owner says otherwise. */
@@ -181,6 +186,30 @@ export class ConfigStore {
             delete this.#config.defaultModel;
         } else {
             this.#config.defaultModel = choice;
+        }
+
+        this.save();
+    }
+
+    /** The owner's values for a module's settings (`web.settings`): a copy, by name. */
+    extensionSettings(module: string): Record<string, string | number | boolean> {
+        return { ...(this.#config.extensionSettings?.[module] ?? {}) };
+    }
+
+    /** Keep a module's values, all of them at once; none drops its entry. */
+    setExtensionSettings(module: string, values: Record<string, string | number | boolean>): void {
+        const all = { ...(this.#config.extensionSettings ?? {}) };
+
+        if (Object.keys(values).length === 0) {
+            delete all[module];
+        } else {
+            all[module] = { ...values };
+        }
+
+        if (Object.keys(all).length === 0) {
+            delete this.#config.extensionSettings;
+        } else {
+            this.#config.extensionSettings = all;
         }
 
         this.save();

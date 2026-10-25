@@ -87,7 +87,174 @@ function ApprovalRule({ owner }) {
     </div>`;
 }
 
-/** What a module adds to the app: its routes, commands, and browser module with how it stands in this browser. */
+/**
+ * A module's settings (`web.settings`), for the owner: each field as the module declared it, saved together. A secret
+ * shows only whether it is set; typing a new one replaces it, and Clear puts its default back.
+ */
+function ModuleSettings({ module }) {
+    const [shown, setShown] = useState(null);
+    const [draft, setDraft] = useState({});
+    const [error, setError] = useState(null);
+    const [busy, setBusy] = useState(false);
+    const path = `extension-settings/${encodeURIComponent(module)}`;
+
+    useEffect(() => {
+        // Only the answer for the module shown now: a slower one for another module never takes its place.
+        let live = true;
+
+        setShown(null);
+        setDraft({});
+        setError(null);
+        api(path).then(
+            (answer) => live && setShown(answer),
+            (failure) => live && setError(failure.message),
+        );
+
+        return () => {
+            live = false;
+        };
+    }, [module]);
+
+    if (error && !shown) {
+        return html`<div class="error-box small">${error}</div>`;
+    }
+
+    if (!shown) {
+        return html`<${Loader} label="Settings" />`;
+    }
+
+    // What a field shows: the owner's change, the default when they asked for it back (null), or the value now.
+    const value = (field) => {
+        if (!Object.hasOwn(draft, field.name)) {
+            return shown.values[field.name] ?? "";
+        }
+
+        return draft[field.name] === null ? (field.default ?? "") : draft[field.name];
+    };
+
+    const set = (name, next) => setDraft({ ...draft, [name]: next });
+
+    const save = async () => {
+        setError(null);
+
+        // A number is typed as text ("-", "1."), and becomes a number only now; an empty one puts the default back.
+        const unreadable = shown.fields.find(
+            (field) =>
+                field.type === "number" &&
+                typeof draft[field.name] === "string" &&
+                draft[field.name].trim() !== "" &&
+                !Number.isFinite(Number(draft[field.name])),
+        );
+
+        if (unreadable !== undefined) {
+            setError(`${unreadable.label} must be a number.`);
+
+            return;
+        }
+
+        setBusy(true);
+
+        const change = Object.fromEntries(
+            Object.entries(draft).map(([name, next]) => {
+                const field = shown.fields.find((each) => each.name === name);
+
+                if (field?.type !== "number" || typeof next !== "string") {
+                    return [name, next];
+                }
+
+                return [name, next.trim() === "" ? null : Number(next)];
+            }),
+        );
+
+        try {
+            setShown(await api(path, change, { method: "PUT" }));
+            setDraft({});
+        } catch (failure) {
+            setError(failure.message);
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return html`<div class="ext-settings">
+        <div class="small"><b>Settings</b></div>
+        ${shown.fields.map((field) => {
+            const secret = field.type === "text" && field.secret;
+            const id = `ext-setting-${module}-${field.name}`;
+            const range =
+                field.type === "number" && (field.min !== undefined || field.max !== undefined)
+                    ? `From ${field.min ?? "any"} to ${field.max ?? "any"}`
+                    : undefined;
+            const hint =
+                secret && shown.set.includes(field.name)
+                    ? "Set: type to replace"
+                    : (field.placeholder ?? "");
+
+            return html`<div class="setting wrap" key=${field.name}>
+                <div class="grow">
+                    <label class="small" for=${id}>${field.label}</label>
+                    ${field.description && html`<div class="muted small">${field.description}</div>`}
+                </div>
+                ${
+                    field.type === "boolean"
+                        ? html`<${Switch}
+                              on=${value(field) === true}
+                              label=${field.label}
+                              onChange=${() => set(field.name, value(field) !== true)}
+                          />`
+                        : field.type === "choice"
+                          ? html`<select
+                                id=${id}
+                                value=${value(field)}
+                                onChange=${(event) => set(field.name, event.currentTarget.value)}
+                            >
+                                ${field.choices.map(
+                                    (choice) =>
+                                        html`<option value=${choice.value}>${choice.label}</option>`,
+                                )}
+                            </select>`
+                          : html`<input
+                                id=${id}
+                                class="ext-setting-input"
+                                type=${secret ? "password" : "text"}
+                                inputmode=${field.type === "number" ? "decimal" : undefined}
+                                autocomplete="off"
+                                placeholder=${hint}
+                                value=${secret ? (draft[field.name] ?? "") : value(field)}
+                                title=${range}
+                                onInput=${(event) => set(field.name, event.currentTarget.value)}
+                            />`
+                }
+                ${
+                    shown.set.includes(field.name) &&
+                    html`<button
+                        class="button small"
+                        title="Put its default back"
+                        disabled=${busy}
+                        onClick=${() => set(field.name, null)}
+                    >
+                        ${secret ? "Clear" : "Default"}
+                    </button>`
+                }
+            </div>`;
+        })}
+        ${error && html`<div class="error-box small">${error}</div>`}
+        <div class="ext-step-actions">
+            <button
+                class="button small primary"
+                disabled=${busy || Object.keys(draft).length === 0}
+                onClick=${save}
+            >
+                ${busy ? "Saving…" : "Save settings"}
+            </button>
+        </div>
+    </div>`;
+}
+
+/**
+ * What a module adds to the app: its routes, commands, public pages, and browser module with how it stands in this
+ * browser.
+ */
 function WebPart({ module }) {
     const web = module.web;
 
@@ -100,6 +267,8 @@ function WebPart({ module }) {
         web.routes.length > 0 && `routes: ${web.routes.join(", ")}`,
         web.commands?.length > 0 && `commands: ${web.commands.join(", ")}`,
         web.client && `browser module for ${ACCESS_WORDS[web.client] ?? web.client}`,
+        web.publicPage && "pages for anyone with a link, no sign-in",
+        web.service && "a service for other modules",
         here?.status === "loading" && "loading here",
         here?.status === "off" && "off in this tab",
     ].filter(Boolean);
@@ -182,21 +351,22 @@ function GalleryPart({ module, installed, busy, turnOff }) {
 
 /** When PiP compacts its own context: once idle above so many tokens (`pip-compact.ts`), or only as sessions do. */
 const PIP_COMPACT = [
+    [0, "As sessions do"],
     [40000, "Above 40k tokens"],
     [60000, "Above 60k tokens"],
     [100000, "Above 100k tokens"],
-    [0, "As sessions do"],
 ];
 
 function PipCompactAt({ owner }) {
-    const at = store.state.server?.pipCompactAt ?? 60000;
+    const at = store.state.server?.pipCompactAt ?? 0;
     const change = (value) => attempt(() => api("settings", { pipCompactAt: value }));
 
     return html`<div class="setting wrap">
         <div class="grow">
             <div class="small">Compact PiP's context</div>
             <div class="muted small">
-                Once PiP is idle above this, older messages become a short summary.
+                When PiP's older messages become a short summary: as a session's do, or sooner,
+                once PiP is idle above a limit, which keeps each reply cheaper.
             </div>
         </div>
         <div class="segmented" role="group" aria-label="Compact PiP's context">
@@ -494,6 +664,12 @@ export function ExtensionsContent({ galleryInstalled, query = "", onChanged = ()
                     ${guard && module.enabled && html`<${ApprovalRule} owner=${owner} />`}
                     ${module.file === "pip.ts" && module.enabled && html`<${PipCompactAt} owner=${owner} />`}
                     <${WebPart} module=${module} />
+                    ${
+                        owner &&
+                        module.enabled &&
+                        module.web?.settings &&
+                        html`<${ModuleSettings} module=${module.file.replace(/\.ts$/, "")} />`
+                    }
                     <${GalleryPart}
                         module=${module}
                         installed=${installed}

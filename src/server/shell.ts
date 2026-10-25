@@ -251,6 +251,15 @@ export class Shell {
             throw new HttpError(413, `Commands are limited to ${MAX_COMMAND} characters.`);
         }
 
+        // A command is stored and shown as typed, and runs from what is stored: one that holds a value an extension hides
+        // (`host.hide`) would keep it in the transcript. The extension's variable carries the value instead.
+        if (app.hidden.replace(command, id) !== command) {
+            throw new HttpError(
+                400,
+                "This command holds a hidden value, which would be stored and shown. Use the variable that carries it instead, such as $NAME.",
+            );
+        }
+
         if (user.role !== "owner" && app.guardOn()) {
             const judged = await app.guard.judge("bash", { command }, app.cwdOf(id));
 
