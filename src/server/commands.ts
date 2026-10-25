@@ -728,7 +728,7 @@ export class Commands {
             beforeSubmit(): Promise<{ user: User; context: Context }>;
             afterSubmit(): void;
         },
-    ): Promise<{ submissionId: SubmissionId; requestId: string }> {
+    ): Promise<{ submissionId: SubmissionId; requestId: string; acceptedText?: string }> {
         const app = this.#app;
 
         app.requireSee(user, id);
@@ -756,11 +756,13 @@ export class Commands {
         const conversation = await app.conversation(id);
         const typed = request.text.trim();
         // `/skill:name request` sends the skill with the request; `/name arguments`, Pi's prompt template of that name.
-        const text = typed.startsWith("/skill:")
+        const expanded = typed.startsWith("/skill:")
             ? (expandSkillCommand(typed, app.skillCommands(id)) ?? typed)
             : typed.startsWith("/")
               ? (expandPromptTemplate(typed, app.promptTemplates(id)) ?? typed)
               : typed;
+        // A value an extension hides (`host.hide`), pasted into the message, is never stored nor sent to the model.
+        const text = app.hidden.replace(expanded, id);
         const attachments = request.attachments ?? [];
 
         if (text === "" && attachments.length === 0) {
@@ -794,7 +796,13 @@ export class Commands {
             request.inlineFiles === true
                 ? await this.#mentionedFiles(id, user, typed, model.input.includes("image"))
                 : [];
-        const parts: (TextContent | ImageContent)[] = [{ type: "text", text: body }, ...mentioned];
+        // A file's text that a message brings along hides what extensions hide (`host.hide`), as the message does.
+        const parts: (TextContent | ImageContent)[] = [
+            { type: "text", text: body },
+            ...mentioned.map((part) =>
+                part.type === "text" ? { ...part, text: app.hidden.replace(part.text, id) } : part,
+            ),
+        ];
 
         for (const file of attachments) {
             if (
@@ -850,6 +858,11 @@ export class Commands {
             await app.collab.activity(id, user, "interrupted the run");
         }
 
+        // A retry of a request finds its first submission: it is no new message, and no event goes out for it again.
+        const known =
+            app.pip.ownerOf(id) === undefined &&
+            (await app.harness.commit((tx) => tx.submissionByRequest(id, requestId), context)) !==
+                undefined;
         const submission = await conversation
             .submit(
                 {
@@ -863,7 +876,10 @@ export class Commands {
             .finally(() => admission?.afterSubmit());
 
         app.collab.setTyping(id, user, null);
-        await this.#touched(id, typed, text === typed ? undefined : text);
+        // The title comes from the message as it was stored: without hidden values.
+        const titled = app.hidden.replace(typed, id);
+
+        await this.#touched(id, titled, text === titled ? undefined : text);
 
         // A person's own words: linked sessions may message each other again (`linked-sessions.ts`).
         if (via === undefined) {
@@ -876,7 +892,45 @@ export class Commands {
             await this.#followFailure(id, user, failure, requestId);
         }
 
-        return { submissionId: submission.id, requestId };
+        // For extensions (`host.on`): once for each message (two retries at once, too), never for PiP's conversation,
+        // which is its person's alone.
+        if (app.pip.ownerOf(id) === undefined && !known && this.#announce(submission.id)) {
+            app.events.emit("message.sent", {
+                conversationId: Number(id),
+                by: user.id,
+                submissionId: String(submission.id),
+                text,
+                ...(via === undefined ? {} : { via }),
+            });
+        }
+
+        return {
+            submissionId: submission.id,
+            requestId,
+            // Victor verifies the redacted transcript, not the local speech that can contain a hidden value.
+            ...(request.source === "victor" ? { acceptedText: text } : {}),
+        };
+    }
+
+    /** Submissions `message.sent` went out for lately: a retry that raced its first try finds its id here. */
+    readonly #announced = new Set<string>();
+
+    /** Whether to send `message.sent` for a submission: once only, as far as this process knows. */
+    #announce(submissionId: unknown): boolean {
+        const key = String(submissionId);
+
+        if (this.#announced.has(key)) {
+            return false;
+        }
+
+        this.#announced.add(key);
+
+        // The newest few hundred are enough: a retry comes within seconds.
+        if (this.#announced.size > 500) {
+            this.#announced.delete(this.#announced.values().next().value!);
+        }
+
+        return true;
     }
 
     /** When a subagent (`id`, its conversation) failed, if it is failed now (not stopped); undefined otherwise. */
@@ -2004,7 +2058,10 @@ export class Commands {
         // Who sent it comes first, then the heading, whole or (from before 0.14.0) without its blank line.
         const [written, files] = splitAttachments(original.text.replace(FROM_PREFIX, ""));
         // An edit that changes nothing is the same as sending the message again.
-        const edit = edited !== undefined && edited !== written.trim() ? edited : undefined;
+        const edit =
+            edited !== undefined && edited !== written.trim()
+                ? app.hidden.replace(edited, id)
+                : undefined;
 
         if (edit === "" && files === undefined) {
             throw new HttpError(400, "Nothing to send");

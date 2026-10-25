@@ -47,6 +47,9 @@ These members are public:
 - `linkedSessions`: `start`, `send`, `list` (experimental in 0.14, see [Experimental](#experimental))
 - `text`: `quoted`, `defang`
 - `thinkingLevels`
+- `fetchPublic(url, init)` (experimental, since 0.20.0)
+- `ask(request, context)`, `hide(value)`, `commandEnv(provider)`, `browser(conversationId, options)` (experimental, since 0.22.0: [People's values and the browser](../people-values.md))
+- `on(event, listener)` and the events of `AppEvents` (experimental, since 0.22.0: [Events, services, and settings](../services-settings.md))
 
 These members are on `host` for Pi Pocket's own built-in extensions: `guard`, `approvals`, `schedules`, `goals`, `browsers`, `memory`, `watches`, `repoWatches`, `gallery`, `pip`, and `pipCompaction`. They are **internal**. A drop-in can read them, but their shapes can change in any release. One of them becomes public only through a request for an extension point ([core-or-extension.md](core-or-extension.md#ask-for-a-new-extension-point)).
 
@@ -55,6 +58,8 @@ The host's members do not change while modules reload. A new member comes only a
 ### 4. `web`
 
 - `api`, `module`, `route`, `conversationRoute` (since 0.16.0), `client`, `command`, `send`, `error`, and `onDispose`.
+- `provide`, `use`, `onService`, `settings`, `setting`, and `onSettings` (experimental, since 0.22.0: [Events, services, and settings](../services-settings.md)).
+- `publicPage` and `links` (experimental, since 0.22.0): pages at `/l/<token>` for anyone with a module's link, what a page handler gets (`PublicPageRequest`), and what its answer does ([Public pages](../public-pages.md)).
 - What a route handler gets (`WebRequest`: `method`, `params`, `query`, `body`, `user`, `signal`; since 0.16.0 also request-lifetime `snapshot`, `context`, `commit`), and what its answer does.
 - A conversation-bound request's `conversation` metadata and human `linkedSessions.start` / `list`, with their authenticated-actor, receipt, and admission checks (since 0.16.0).
 - The route paths, the methods, the `access` values (`owner`, `steer`, `view`), and the `X-Pocket` header that every call to a route must have.
@@ -109,7 +114,7 @@ The host's members do not change while modules reload. A new member comes only a
 - `config.json`, `pocket.sqlite`, and the rest of the data folder, except `extensions/`.
 - All CSS that is not in [CSS](#7-css).
 - The words of errors, notices, logs, and the system prompt.
-- The tools of built-in extensions: their arguments and results. Only their names are public, as reserved names.
+- The tools of built-in extensions: their arguments and results. Only their names are public, as reserved names. One exception, since 0.22.0 and experimental: the `browser` tool's `action` and the arguments that name its target (`ref`, `selector`, `label`, `x`, and `y`), so that a hook can guard what Pi types ([People's values and the browser](../people-values.md)).
 - The `host` members for built-in extensions ([host](#3-host)).
 - The test helpers in `test/`. The index's checks use them, and pin the Pi Pocket version they use.
 
@@ -136,12 +141,23 @@ All public interfaces are stable, unless the docs mark them experimental or depr
   _Reason:_ a new interface must be able to change while its first users find its problems.
 - **A5. An experimental member becomes stable when the release notes say so.**\
   _Reason:_ the change of status is then easy to find.
+- **A5.1. An experimental member is ready to become stable when all of these are true:**
+    - at least two modules use it that are not by the same author, and at least one of them is not built in (a gallery extension, or a drop-in shared in an issue);
+    - one minor release went out with no change to its signature or to what it does;
+    - its reference, a guide, and a test of its own are in place, and its limits are on the limits page;
+    - no issue about it is open that asks for a change that would break modules.
+
+    Each minor release, the maintainers look at the experimental members that meet these, and either make them stable in the release notes or say what still stops them.\
+    _Reason:_ an interface is right when it served people other than the one who asked for it, without changes.
+
 - **A6. A gallery entry that uses an experimental member should say so in its description.**\
   _Reason:_ the owner then knows that an update of Pi Pocket can break it.
 
 `host.linkedSessions` remains experimental in 0.16.0. The human-bound `linkedSessions` on a conversation route is a separate stable interface, added in 0.16.0. Other public members are stable unless marked otherwise.
 
 Since 0.19.0, these `pocket` members are experimental too: `panel`, `openPanel`, `closePanel`, `status`, `topbar`, `composerButton`, `replyAction`, `insertText`, `arrange`, and their types. The `core:` ids of the items in slots are public, with the same promise as the names of the theme surface.
+
+Since 0.22.0, these are experimental too: `web.publicPage` and `web.links`; `host.ask`, `hide`, `commandEnv`, and `browser`; `host.on`; `web.provide`, `use`, `onService`, `settings`, `setting`, and `onSettings`; `pocket.settings` and `onSettings`; and their types. So are the `browser` tool's `action` and target arguments, for hooks.
 
 Since 0.20.0, the session list's extension points are experimental: `pocket.sessionChips`, `sessionAction`, `sessionFilter`, and `sessionSearch`, `WebRequest.sessions`, and their types. So is `pocket.composerKey`, with `ComposerKeySpec` and `ComposerBox`, and so are `pocket.onConversation`, `messages`, and `reveal`, with `MessagesOptions`, `MessagePage`, and `MessageInfo`. So are `host.registerModelProvider`, and `host.fetchPublic` with `PublicFetchInit`.
 

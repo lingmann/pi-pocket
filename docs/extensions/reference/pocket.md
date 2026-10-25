@@ -355,6 +355,26 @@ Since 0.14.0 · Stable
 
 Calls `run` with the data of each `event` that the module sends with `web.send`. It returns a function: call it to stop. The app keeps no events for a page that is closed. Thus a page that opens must first get the data that is current, and then listen. [Events](../events.md) tells you more.
 
+### `settings`
+
+```ts
+settings(): Promise<{ fields: SettingField[]; values: Record<string, SettingValue | null>; set: string[] }>;
+```
+
+Since 0.22.0 · Experimental
+
+The module's settings ([`web.settings`](web.md#settings)) as the person in this tab may read them: the fields, each value (the owner's or the default), and which ones the owner set. A secret field's value is left out of `values`; `set` says whether it is set. It rejects with a 404 when the module declares no settings, or is off.
+
+### `onSettings`
+
+```ts
+onSettings(run: () => void): () => void;
+```
+
+Since 0.22.0 · Experimental
+
+Calls `run` after the owner changes the module's settings: read them again with `settings()`. It returns a function: call it to stop.
+
 ## Adding to the app
 
 Each thing that a module adds has an `id` of its own. To add one with the same `id` again replaces it. [Names](names.md#what-a-browser-module-adds) gives the rules for ids.

@@ -48,6 +48,7 @@ The types file imports types from Pi Durable, Pi AI, and Preact by package name.
 - [`Command`, `CommandContext`, and `CommandResult`](command-context.md).
 - [`Pocket`](pocket.md) and the types that it uses: `BrowserModule`, `Action`, the objects that you give (`RailSpec`, `MenuSpec`, `LauncherSpec`, `PageSpec`, `SheetSpec`, `ToolCallSpec`, `CallSummary`), `Added`, `PageProps`, `SheetProps`, and the props of the pieces.
 - `Module`, `Person`, `Role`, and `NoticeLevel`, on this page.
+- Since 0.22.0, experimental: `PublicPageHandler`, `PublicPageRequest`, `PublicPageAnswer`, `PublicLinks`, `PublicLinkRequest`, and `PublicLinkInfo` ([Public pages](../public-pages.md)); `AskRequest`, `AskField`, `AskAnswer`, `HiddenValue`, `CommandRun`, `CommandEnvProvider`, `BrowserPageHandle`, `BrowserControl`, and `BrowserTarget` ([People's values](../people-values.md)); `AppEvents`, `AppEventName`, `SettingField`, and `SettingValue` ([Events, services, and settings](../services-settings.md)).
 
 The types file does not have the internal members of the host. It does not have Pi Durable's own API either: import `defineExtension`, `defineTool`, and the rest from `@earendil-works/pi-durable`.
 

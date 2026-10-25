@@ -2639,6 +2639,26 @@ pre.diff .del {
     line-height: 1.5;
 }
 
+/* An extension's question for the person Pi works for (`host.ask`): a field for each value, a thumb's height. */
+.ask-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 13px;
+    color: var(--muted);
+}
+
+.ask-field input {
+    min-height: 40px;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    font-size: 15px;
+}
+
 .approval-actions {
     display: flex;
     justify-content: flex-end;
@@ -4634,6 +4654,74 @@ pre.diff .del {
 /* The last child: only the corner, no line on down. */
 .session-branches > .elbow:not(.continues)::before {
     display: none;
+}
+
+/*
+ * A row with linked sessions under it: a button on its right shows how many and folds them away (`sessions.js`). The
+ * row's own button keeps its right side clear of it, and the hover actions move in beside it.
+ */
+.session-fold {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-width: 44px;
+    padding: 0 6px;
+    font: 11px var(--mono);
+    color: var(--muted);
+}
+
+/* The control itself: how many, and a chevron, in a quiet pill; the whole 44px beside it takes the tap. */
+.session-fold-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    height: 20px;
+    padding: 0 6px;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-pill);
+    background: var(--card-2);
+    transition:
+        color var(--t-hover) var(--ease-out),
+        border-color var(--t-hover) var(--ease-out);
+}
+
+/* Above the open session: its group stays open, so the fold waits. */
+.session-fold:disabled {
+    cursor: default;
+    opacity: 0.5;
+}
+
+@media (hover: hover) {
+    .session-fold:not(:disabled):hover .session-fold-pill {
+        color: var(--text);
+        border-color: var(--accent-line);
+    }
+}
+
+.session-fold .icon {
+    transition: transform var(--t-in) var(--ease-out);
+}
+
+.session-fold.folded .icon {
+    transform: rotate(-90deg);
+}
+
+.session-row.with-fold .session {
+    padding-right: 64px;
+}
+
+.session-row.with-fold .session-actions {
+    right: 62px;
+}
+
+/* Chips take a line under the title: the fold stays beside the title's line. */
+.session-row.with-chips .session-fold {
+    bottom: 20px;
 }
 
 /* One line: the folder's color, the title, and what goes on there on the right. */
@@ -15153,6 +15241,30 @@ textarea.notes {
     animation: rise-in var(--t-fade) var(--ease-out);
 }
 
+/* A message of yours that waits while PiP works: dimmed, with what happens to it and a way to take it back. */
+.pip-you.pending {
+    opacity: 0.7;
+    border: 1px dashed var(--accent-line);
+}
+
+.pip-pending-line {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--muted);
+    white-space: normal;
+}
+
+.pip-pending-withdraw {
+    min-height: 40px;
+    padding: 0 4px;
+    color: var(--accent);
+    font: inherit;
+}
+
 .pip-reply {
     color: var(--body);
     overflow-wrap: anywhere;
@@ -16254,6 +16366,27 @@ textarea.notes {
     color: var(--muted);
     font-size: 12.5px;
     line-height: 1.55;
+}
+
+/* A module's settings (`web.settings`) in its open row: its fields as the app's settings rows. */
+.ext-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 0;
+    border-top: 1px solid var(--line);
+}
+
+.ext-setting-input,
+.ext-settings select {
+    min-height: 36px;
+    max-width: 220px;
+    padding: 6px 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
 }
 
 .ext-step-actions {

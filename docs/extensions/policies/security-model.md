@@ -52,7 +52,7 @@ Sources: [Routes](../routes.md); architecture.md, "A request".
 | `"steer"`           | The owner, and guests who can steer every session   |
 | `"view"`            | The owner, guests, and viewers who see all sessions |
 
-People who were invited to one session never reach a module's routes or its browser module. Each route has its own `access`. To a person whom its `access` does not let in, a route is not there (404). Every call needs the `X-Pocket` header, a GET too, so a link or a form on another site cannot call a route.
+People who were invited to one session never reach a module's routes or its browser module. A module's public pages (`web.publicPage`, since 0.22.0) are the exception: anyone with one of its links reaches them, with no sign-in, and the token is the whole of the access ([Public pages](../public-pages.md)). Each route has its own `access`. To a person whom its `access` does not let in, a route is not there (404). Every call needs the `X-Pocket` header, a GET too, so a link or a form on another site cannot call a route.
 
 - **S3.1. Give `"owner"` or `"steer"` to a route that changes something.** `access` applies to every method. A POST route with `"view"` lets viewers change something, but viewers must not make anything happen.\
   _Reason:_ a viewer must not be able to act.
@@ -60,6 +60,8 @@ People who were invited to one session never reach a module's routes or its brow
   _Reason:_ when a person cannot use one route, another route with a matching path can answer them (`items/:id` for `items/new`).
     - **S3.3. Check each `:name` part before you make a file path with it.** The server refuses `..`, `\`, and NUL, but nothing else.\
       _Reason:_ a path part is text from outside.
+- **S3.4. On a public page, show only what the link is for, escape all that you put in it, and give each link a short life and few uses.** Anyone on the internet who has the address reads the page and sends its form. The page runs no script, but HTML that you did not escape can still change what it says.\
+  _Reason:_ a link travels further than the person who got it.
 
 Since 0.16.0, request document commits also reject viewers and expire on disconnect or handler return. These capabilities are for the module's own documents, not core state. An ordinary catalog save does not require a source turn or spend allowance. A `web.conversationRoute` adds actual-source authorization before the handler: GET needs seeing, mutations need steering and the turn. It does not bypass ordinary route `access` or permit single-session invitees.
 
@@ -120,6 +122,8 @@ Know where each output goes:
 | `host.notice(level, message)`                    | Everyone who sees all sessions; with a session's ID, the tabs of that session |
 | Files in the browser module's folder             | Everyone whom the browser module is for                                       |
 | Documents                                        | Every module, and Pi through its shell                                        |
+| `host.ask`'s values (since 0.22.0)               | The module that asked, alone                                                  |
+| A public page (`web.publicPage`)                 | Anyone with the link                                                          |
 
 - **S6.1. Put no secret in any of these, except when the people who get it may have it.**\
   _Reason:_ each of them leaves the server part of the module.
@@ -127,6 +131,10 @@ Know where each output goes:
   _Reason:_ the server log keeps errors, and `web.error` shows its words.
 - **S6.3. Do not ask people to type a password or a key as a command's `args`.**\
   _Reason:_ the task stores the arguments.
+- **S6.4. Ask for a password, a key, or a code with `host.ask`, and never through Pi.** Do not keep what comes back in a memo or a document, and tell Pi only what happened.\
+  _Reason:_ what Pi reads goes to the model provider and into the transcript; a memo and a document are stored.
+- **S6.5. Hide a value with `host.hide` as soon as you have it, and each form of it that you expect, such as its base64.** Give a command a value with `host.commandEnv`, and only to the commands, sessions, and people that may use it.\
+  _Reason:_ a command can print a value, and a guest's message can lead Pi to a command. Hiding keeps values out of transcripts by accident; it is not a boundary against a command or a model that leaks one on purpose. It also tells whether a guess is right, so it protects only a value that cannot be guessed, never a short code ([People's values and the browser](../people-values.md)).
 
 ## S7. Names for stored data
 

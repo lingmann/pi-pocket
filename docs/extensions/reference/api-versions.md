@@ -62,22 +62,25 @@ A gallery entry gives `pocketApi` and `minPocket`: the API version and the oldes
 
 Each member in the reference has its own Since line. These parts came together:
 
-| Part                                                                                                                                 | Since  |
-| ------------------------------------------------------------------------------------------------------------------------------------ | ------ |
-| Built-in modules, the host, tools, sections, hooks                                                                                   | 0.1.0  |
-| Drop-ins in the drop-in folder                                                                                                       | 0.3.0  |
-| `web`: routes, browser modules, events, cleanups                                                                                     | 0.14.0 |
-| `pocketApi`, `web.api`, and `pocket.version`                                                                                         | 0.14.0 |
-| `pocketApi` 2                                                                                                                        | 0.19.0 |
-| Slash commands (`web.command`)                                                                                                       | 0.14.0 |
-| `pocket.toolCall`                                                                                                                    | 0.14.0 |
-| `host.linkedSessions`                                                                                                                | 0.14.0 |
-| `pocket.panel` and `pocket.status` (experimental)                                                                                    | 0.19.0 |
-| Slots: `pocket.topbar`, `composerButton`, `replyAction`, `insertText`, `arrange` (experimental)                                      | 0.19.0 |
-| `cwd` in `host.linkedSessions.start` and the human-bound `linkedSessions.start`                                                      | 0.19.0 |
-| The session list: `pocket.sessionChips`, `sessionAction`, `sessionFilter`, `sessionSearch`, and `WebRequest.sessions` (experimental) | 0.20.0 |
-| `host.registerModelProvider` (experimental)                                                                                          | 0.20.0 |
-| `host.fetchPublic` (experimental)                                                                                                    | 0.20.0 |
-| Keys in the message boxes: `pocket.composerKey` (experimental)                                                                       | 0.20.0 |
-| The session's messages: `pocket.onConversation`, `messages`, `reveal` (experimental)                                                 | 0.20.0 |
-| `group` in `pocket.menu` (experimental)                                                                                              | 0.21.0 |
+| Part                                                                                                                                                              | Since  |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| Built-in modules, the host, tools, sections, hooks                                                                                                                | 0.1.0  |
+| Drop-ins in the drop-in folder                                                                                                                                    | 0.3.0  |
+| `web`: routes, browser modules, events, cleanups                                                                                                                  | 0.14.0 |
+| `pocketApi`, `web.api`, and `pocket.version`                                                                                                                      | 0.14.0 |
+| `pocketApi` 2                                                                                                                                                     | 0.19.0 |
+| Slash commands (`web.command`)                                                                                                                                    | 0.14.0 |
+| `pocket.toolCall`                                                                                                                                                 | 0.14.0 |
+| `host.linkedSessions`                                                                                                                                             | 0.14.0 |
+| `pocket.panel` and `pocket.status` (experimental)                                                                                                                 | 0.19.0 |
+| Slots: `pocket.topbar`, `composerButton`, `replyAction`, `insertText`, `arrange` (experimental)                                                                   | 0.19.0 |
+| `cwd` in `host.linkedSessions.start` and the human-bound `linkedSessions.start`                                                                                   | 0.19.0 |
+| The session list: `pocket.sessionChips`, `sessionAction`, `sessionFilter`, `sessionSearch`, and `WebRequest.sessions` (experimental)                              | 0.20.0 |
+| `host.registerModelProvider` (experimental)                                                                                                                       | 0.20.0 |
+| `host.fetchPublic` (experimental)                                                                                                                                 | 0.20.0 |
+| Keys in the message boxes: `pocket.composerKey` (experimental)                                                                                                    | 0.20.0 |
+| The session's messages: `pocket.onConversation`, `messages`, `reveal` (experimental)                                                                              | 0.20.0 |
+| `group` in `pocket.menu` (experimental)                                                                                                                           | 0.21.0 |
+| Public pages: `web.publicPage` and `web.links` (experimental)                                                                                                     | 0.22.0 |
+| People's values and the browser: `host.ask`, `hide`, `commandEnv`, `browser` (experimental)                                                                       | 0.22.0 |
+| Events, services, and settings: `host.on`, `web.provide`, `use`, `onService`, `settings`, `setting`, `onSettings`, `pocket.settings`, `onSettings` (experimental) | 0.22.0 |

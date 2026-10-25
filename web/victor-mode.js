@@ -672,7 +672,7 @@ async function submitFinal(transcript) {
     update({ message: "Sending to Pi…" });
 
     try {
-        await api(`c/${attempt.id}/submit`, {
+        const result = await api(`c/${attempt.id}/submit`, {
             text,
             requestId: attempt.requestId,
             source: "victor",
@@ -687,6 +687,12 @@ async function submitFinal(transcript) {
             update({});
 
             return;
+        }
+
+        // The server can redact hidden values. Use its prepared text, but still require an exact
+        // transcript match and our author attribution. A different stored message still fails closed.
+        if (typeof result?.acceptedText === "string") {
+            attempt.text = result.acceptedText;
         }
 
         startingText = "";
@@ -774,7 +780,7 @@ function reconcile() {
         users.length > 1 ||
         users.some(
             (entry) =>
-                entry.text.trim() !== pending.text ||
+                (pending.accepted && entry.text.trim() !== pending.text) ||
                 (view.authors[entry.id] !== undefined && view.authors[entry.id] !== state.me.id),
         ) ||
         added.some((entry) => entry.kind === "reset")

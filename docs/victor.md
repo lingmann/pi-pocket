@@ -43,6 +43,8 @@ The style follows each submitted message, not the microphone's current state. Tu
 
 Victor sends `source: "victor"` with its text. The server records the source before submitting the input, keyed by the existing request ID, and retries keep the first recorded source. The extension reads the latest input placed in the active run, so the style survives tool calls, compaction, and server restarts. A new untagged message, including a scheduled message or subagent report, uses normal style. There is no separate server-side microphone toggle. Moving a queued message to Interrupt preserves its source and the sources of the other messages queued again behind it. These source records are copied in the same transaction that creates the interrupt task, before any replacement message can run.
 
+The submit response for Victor includes `acceptedText`, the server-prepared text after hidden-value replacement (`host.hide`). The controller checks the transcript against this text only after the response arrives, and still requires its own author attribution and no competing message. This field is not proof of the first submission's content when a request ID is reused; Victor creates a fresh ID for each send and never automatically retries.
+
 #### Configure the voice instruction
 
 On a server running the integrated 0.14 API, the owner can use these native commands in an accessible conversation. They run without asking the model:

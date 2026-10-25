@@ -1,6 +1,6 @@
 /**
  * The HTTP server's one request handler: the API (`http/api.ts`), artifacts, the sign-in pages, extensions' browser
- * modules, and the web app's own files. Each part lives in `http/`; this file routes a request to it and turns what it
+ * modules and public pages, and the web app's own files. Each part lives in `http/`; this file routes a request to it and turns what it
  * throws into an answer.
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -11,6 +11,7 @@ import { createApi } from "./http/api.ts";
 import { artifact } from "./http/artifacts.ts";
 import { extensionFile } from "./http/extension-routes.ts";
 import { hookRoute } from "./http/hook-routes.ts";
+import { linkRoute } from "./http/link-routes.ts";
 import { serveApp, serveFile, VENDOR, WEB } from "./http/assets.ts";
 import { serveVictorAssets } from "./http/victor-assets.ts";
 import { type HttpOptions, json } from "./http/io.ts";
@@ -54,6 +55,14 @@ export function createHandler(options: HttpOptions) {
                 const token = parts.length === 2 ? parts[1] : undefined;
 
                 return await publicArtifact(app, request, response, token, url.searchParams);
+            }
+
+            // A page an extension module shows to anyone with its link: the token is the whole of the access, no sign-in.
+            // Exactly `/l/<token>`.
+            if (parts[0] === "l") {
+                const token = parts.length === 2 ? parts[1] : undefined;
+
+                return await linkRoute(app, request, response, token, url);
             }
 
             if (parts[0] === "a") {

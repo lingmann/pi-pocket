@@ -21,6 +21,7 @@ import type {
     DocumentReader,
     Extension,
     ModelRef,
+    TaskId,
     Tx,
 } from "@earendil-works/pi-durable";
 import type { ComponentType, Fragment, FunctionComponent, h, VNode } from "preact";
@@ -181,6 +182,39 @@ export interface Host {
      */
     requesterOf(conversationId: ConversationId): string | undefined;
     /**
+     * Listens to what happens in the app: sessions made, renamed, and archived, messages people send to Pi, and runs that start and end. Returns how to stop: pass it to `web.onDispose`. PiP's conversations send none.
+     * @since 0.22.0
+     * @experimental
+     */
+    on<E extends AppEventName>(event: E, listener: (data: AppEvents[E]) => unknown): () => void;
+    /**
+     * Asks the person Pi works for on a card in the session: their answer, with what they typed, goes to the extension, never to Pi or into the transcript. Do not keep the values in a memo or a document.
+     * @since 0.22.0
+     * @experimental
+     */
+    ask(request: AskRequest, context: Context): Promise<AskAnswer>;
+    /**
+     * Hides a value from what Pi and people read: command output as it streams, each tool's result, and people's messages to Pi. It shows as `[label]`. Returns how to stop: pass it to `web.onDispose`.
+     * @since 0.22.0
+     * @experimental
+     */
+    hide(value: HiddenValue): () => void;
+    /**
+     * Adds environment variables to the commands that run in sessions (bash, `!` commands, checks), chosen for each command. Returns how to stop: pass it to `web.onDispose`.
+     * @since 0.22.0
+     * @experimental
+     */
+    commandEnv(provider: CommandEnvProvider): () => void;
+    /**
+     * A session's browser page, the one Pi and people use: opened when `open` is true, else only when it is open already. Undefined while the Browser module is off.
+     * @since 0.22.0
+     * @experimental
+     */
+    browser(
+        conversationId: ConversationId,
+        options?: { open?: boolean },
+    ): Promise<BrowserPageHandle | undefined>;
+    /**
      * Reports something to the server log and to the app. With `conversationId` (since 0.13.1), only that session's
      * tabs show it.
      * @since 0.1.0
@@ -240,6 +274,472 @@ export interface SafeText {
      * @since 0.14.0
      */
     defang(text: string): string;
+}
+
+/**
+ * The events of `host.on`, and what each listener gets.
+ * @since 0.22.0
+ * @experimental
+ */
+export interface AppEvents {
+    /**
+     * A session was made: by a person, a fork, a linked start, or a resend.
+     * @since 0.22.0
+     * @experimental
+     */
+    "session.created": {
+        conversationId: number;
+        cwd: string;
+        createdBy?: string;
+        forkedFrom?: number;
+        linkedFrom?: number;
+    };
+    /**
+     * A session got a new title.
+     * @since 0.22.0
+     * @experimental
+     */
+    "session.renamed": { conversationId: number; title: string };
+    /**
+     * A session was archived, or brought back.
+     * @since 0.22.0
+     * @experimental
+     */
+    "session.archived": { conversationId: number; archived: boolean };
+    /**
+     * A person sent Pi a message: its words as stored, attachments left out. `via` names what sent it for them.
+     * @since 0.22.0
+     * @experimental
+     */
+    "message.sent": {
+        conversationId: number;
+        by: string;
+        submissionId: string;
+        text: string;
+        via?: string;
+    };
+    /**
+     * Pi started to work in a conversation, a session's or a subagent's. `session` is its session.
+     * @since 0.22.0
+     * @experimental
+     */
+    "run.started": { conversationId: number; session: number };
+    /**
+     * Pi stopped working in a conversation.
+     * @since 0.22.0
+     * @experimental
+     */
+    "run.ended": { conversationId: number; session: number };
+}
+
+/**
+ * The name of an event of `host.on`.
+ * @since 0.22.0
+ * @experimental
+ */
+export type AppEventName = keyof AppEvents;
+
+/**
+ * One setting that a module declares (`web.settings`).
+ * @since 0.22.0
+ * @experimental
+ */
+export type SettingField =
+    | { name: string; label: string; description?: string; type: "boolean"; default?: boolean }
+    | {
+          name: string;
+          label: string;
+          description?: string;
+          type: "text";
+          default?: string;
+          placeholder?: string;
+          secret?: boolean;
+      }
+    | {
+          name: string;
+          label: string;
+          description?: string;
+          type: "number";
+          default?: number;
+          min?: number;
+          max?: number;
+      }
+    | {
+          name: string;
+          label: string;
+          description?: string;
+          type: "choice";
+          default?: string;
+          choices: { value: string; label: string }[];
+      };
+
+/**
+ * A setting's value.
+ * @since 0.22.0
+ * @experimental
+ */
+export type SettingValue = string | number | boolean;
+
+/**
+ * A question for the person Pi works for, on a card in the session (`host.ask`).
+ * @since 0.22.0
+ * @experimental
+ */
+export interface AskRequest {
+    /**
+     * The session to ask in.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly conversationId: ConversationId;
+    /**
+     * Unique while it waits, and the same when the call asks again: `${api.taskId}:${api.callId}`.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly id: string;
+    /**
+     * The task that asks, so the card shows with its call.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly taskId: TaskId;
+    /**
+     * The model's tool call id, to show the answer on the call's card.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly callId?: string;
+    /**
+     * One line: what is asked, such as "Sign in to example.com".
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly title: string;
+    /**
+     * More words, up to 2000 characters.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly text?: string;
+    /**
+     * Up to 6 fields; none for a question answered with the button alone.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly fields?: readonly AskField[];
+    /**
+     * The button's words: "Send" by default, "Done" with no fields.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly submit?: string;
+}
+
+/**
+ * One field of an ask's card.
+ * @since 0.22.0
+ * @experimental
+ */
+export interface AskField {
+    /**
+     * The value's key in the answer: letters, digits, and _, starting with a letter.
+     * @since 0.22.0
+     * @experimental
+     */
+    name: string;
+    /**
+     * What the card says above the field.
+     * @since 0.22.0
+     * @experimental
+     */
+    label: string;
+    /**
+     * A hidden input, as for a password.
+     * @since 0.22.0
+     * @experimental
+     */
+    secret?: boolean;
+    /**
+     * What the field shows while empty.
+     * @since 0.22.0
+     * @experimental
+     */
+    placeholder?: string;
+    /**
+     * A hint for the browser and the phone's keyboard, such as `current-password` or `one-time-code`.
+     * @since 0.22.0
+     * @experimental
+     */
+    autocomplete?: string;
+}
+
+/**
+ * What the person did with an ask: answered, with what they typed in each field, or declined.
+ * @since 0.22.0
+ * @experimental
+ */
+export type AskAnswer =
+    | {
+          readonly answered: true;
+          readonly by: string;
+          readonly values: Readonly<Record<string, string>>;
+      }
+    | { readonly answered: false; readonly by: string };
+
+/**
+ * A value core hides (`host.hide`).
+ * @since 0.22.0
+ * @experimental
+ */
+export interface HiddenValue {
+    /**
+     * The text to hide: 4 to 4096 characters.
+     * @since 0.22.0
+     * @experimental
+     */
+    value: string;
+    /**
+     * What shows in its place, as `[label]`: letters, digits, spaces, and _ . : -.
+     * @since 0.22.0
+     * @experimental
+     */
+    label: string;
+    /**
+     * Only in this session; absent: in every session.
+     * @since 0.22.0
+     * @experimental
+     */
+    conversationId?: number;
+}
+
+/**
+ * A command about to run, as a `host.commandEnv` provider gets it.
+ * @since 0.22.0
+ * @experimental
+ */
+export interface CommandRun {
+    /**
+     * The session it runs in.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly conversationId: number;
+    /**
+     * The command as the shell gets it, or a program and its arguments.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly command: string | readonly string[];
+    /**
+     * The folder it runs in.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly cwd: string;
+}
+
+/**
+ * Gives the environment variables to add to one command, or nothing.
+ * @since 0.22.0
+ * @experimental
+ */
+export type CommandEnvProvider = (
+    run: CommandRun,
+) => Record<string, string> | undefined | Promise<Record<string, string> | undefined>;
+
+/**
+ * What an extension points at on a page: a ref from the snapshot, a CSS selector, a visible label, or a point.
+ * @since 0.22.0
+ * @experimental
+ */
+export interface BrowserTarget {
+    /**
+     * A ref from the last snapshot, such as `e12`.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly ref?: string;
+    /**
+     * A CSS selector.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly selector?: string;
+    /**
+     * The element's visible text or label.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly label?: string;
+    /**
+     * A point in CSS pixels of the viewport, with `y`.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly x?: number;
+    /**
+     * A point in CSS pixels of the viewport, with `x`.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly y?: number;
+}
+
+/**
+ * One control of a page's snapshot, as data. A password field's value is `••••` when it holds one.
+ * @since 0.22.0
+ * @experimental
+ */
+export interface BrowserControl {
+    /**
+     * Its ref, until the next snapshot.
+     * @since 0.22.0
+     * @experimental
+     */
+    ref: string;
+    /**
+     * Its role: `button`, `link`, `textbox`, `checkbox`, …, or `clickable`.
+     * @since 0.22.0
+     * @experimental
+     */
+    role: string;
+    /**
+     * Its accessible name.
+     * @since 0.22.0
+     * @experimental
+     */
+    name: string;
+    /**
+     * An input's type (`text`, `password`, `email`, …), `textarea`, `select`, or the element's tag.
+     * @since 0.22.0
+     * @experimental
+     */
+    kind: string;
+    /**
+     * Whether it is disabled.
+     * @since 0.22.0
+     * @experimental
+     */
+    disabled: boolean;
+    /**
+     * Whether it is in the viewport now.
+     * @since 0.22.0
+     * @experimental
+     */
+    inView: boolean;
+    /**
+     * A field's or a select's value.
+     * @since 0.22.0
+     * @experimental
+     */
+    value?: string;
+    /**
+     * A field's placeholder.
+     * @since 0.22.0
+     * @experimental
+     */
+    placeholder?: string;
+    /**
+     * A checkbox's or radio button's state.
+     * @since 0.22.0
+     * @experimental
+     */
+    checked?: boolean;
+    /**
+     * A select's options, up to 50.
+     * @since 0.22.0
+     * @experimental
+     */
+    options?: string[];
+    /**
+     * A link's address.
+     * @since 0.22.0
+     * @experimental
+     */
+    href?: string;
+}
+
+/**
+ * A session's browser page, as extensions use it (`host.browser`).
+ * @since 0.22.0
+ * @experimental
+ */
+export interface BrowserPageHandle {
+    /**
+     * The page's address now.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly url: string;
+    /**
+     * The page's title now.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly title: string;
+    /**
+     * The page as Pi reads it, with refs such as `[e12]`, and its controls as data. Refs last until the next snapshot.
+     * @since 0.22.0
+     * @experimental
+     */
+    snapshot(): Promise<{ text: string; controls: BrowserControl[]; truncated: boolean }>;
+    /**
+     * What a target is: its description, its kind, and whether it is a field or a password field.
+     * @since 0.22.0
+     * @experimental
+     */
+    inspect(
+        target: BrowserTarget,
+    ): Promise<{ label: string; kind: string; editable: boolean; password: boolean }>;
+    /**
+     * Opens an http(s) address, host:port, or a file path.
+     * @since 0.22.0
+     * @experimental
+     */
+    navigate(url: string): Promise<void>;
+    /**
+     * Clicks a target.
+     * @since 0.22.0
+     * @experimental
+     */
+    click(target: BrowserTarget): Promise<{ label: string; navigated: boolean }>;
+    /**
+     * Types into a target as Pi types.
+     * @since 0.22.0
+     * @experimental
+     */
+    type(target: BrowserTarget, text: string, options?: { submit?: boolean }): Promise<string>;
+    /**
+     * Puts a person's value into a field, such as a password: the value is not in what comes back.
+     * @since 0.22.0
+     * @experimental
+     */
+    fill(target: BrowserTarget, value: string): Promise<string>;
+    /**
+     * Picks an option of a select element by its value or text.
+     * @since 0.22.0
+     * @experimental
+     */
+    select(target: BrowserTarget, value: string): Promise<string>;
+    /**
+     * Presses a key or a combination, such as `Enter`.
+     * @since 0.22.0
+     * @experimental
+     */
+    press(key: string): Promise<void>;
+    /**
+     * Scrolls a target into view, or the page by `dy` pixels.
+     * @since 0.22.0
+     * @experimental
+     */
+    scroll(target?: BrowserTarget, dy?: number): Promise<string>;
+    /**
+     * Waits until text or a selector shows: true when it did in time.
+     * @since 0.22.0
+     * @experimental
+     */
+    waitFor(options: { text?: string; selector?: string; timeoutMs?: number }): Promise<boolean>;
 }
 
 /**
@@ -527,6 +1027,210 @@ export interface ConversationWebRequest extends WebRequest {
 export type WebHandler = (request: WebRequest) => unknown;
 
 /**
+ * What a module asks for when it makes a public link (`web.links.create`).
+ * @since 0.22.0
+ * @experimental
+ */
+export interface PublicLinkRequest {
+    /**
+     * How long the link stays open, in hours: more than 0, and 720 (30 days) at most.
+     * @since 0.22.0
+     * @experimental
+     */
+    hours: number;
+    /**
+     * How many answered posts it takes before it closes. Without it, any number until its time.
+     * @since 0.22.0
+     * @experimental
+     */
+    uses?: number;
+    /**
+     * Who it is for: a person's id, such as a route's `user.id`.
+     * @since 0.22.0
+     * @experimental
+     */
+    by?: string;
+    /**
+     * The session it is about.
+     * @since 0.22.0
+     * @experimental
+     */
+    conversation?: number;
+    /**
+     * A small JSON value of the module's own, up to 4 KB, given back with the link.
+     * @since 0.22.0
+     * @experimental
+     */
+    data?: unknown;
+}
+
+/**
+ * A public link, as its module sees it.
+ * @since 0.22.0
+ * @experimental
+ */
+export interface PublicLinkInfo {
+    /**
+     * The link's token: 32 hex characters, the whole of its access.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly token: string;
+    /**
+     * Its address on this server: `/l/<token>`.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly path: string;
+    /**
+     * Its whole address on the server's public one (a tunnel's), or null when the server has none.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly url: string | null;
+    /**
+     * When it was made, in milliseconds since 1970.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly createdAt: number;
+    /**
+     * When it closes, in milliseconds since 1970.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly expiresAt: number;
+    /**
+     * How many answers it takes still, or null for any number.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly uses: number | null;
+    /**
+     * Who it is for, as the module said, or null.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly by: string | null;
+    /**
+     * The session it is about, as the module said, or null.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly conversation: number | null;
+    /**
+     * The module's own value, or null.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly data: unknown;
+}
+
+/**
+ * A module's public links: pages at `/l/<token>` for anyone with the address, which `web.publicPage` draws.
+ * @since 0.22.0
+ * @experimental
+ */
+export interface PublicLinks {
+    /**
+     * Makes a link. It always closes: at its time, after its uses, or when the module ends it.
+     * @since 0.22.0
+     * @experimental
+     */
+    create(link: PublicLinkRequest): Promise<PublicLinkInfo>;
+    /**
+     * One of this module's open links, or undefined.
+     * @since 0.22.0
+     * @experimental
+     */
+    get(token: string): Promise<PublicLinkInfo | undefined>;
+    /**
+     * This module's open links, newest first.
+     * @since 0.22.0
+     * @experimental
+     */
+    list(): Promise<PublicLinkInfo[]>;
+    /**
+     * Ends one of this module's links at once. It gives whether there was one to end.
+     * @since 0.22.0
+     * @experimental
+     */
+    end(token: string): Promise<boolean>;
+}
+
+/**
+ * A request to a public link's page, from anyone with its address. There is no person and no sign-in.
+ * @since 0.22.0
+ * @experimental
+ */
+export interface PublicPageRequest {
+    /**
+     * `GET` shows the page; `POST` is a form on it, sent back to the same address.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly method: "GET" | "POST";
+    /**
+     * The link that the address names. It is still open.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly link: PublicLinkInfo;
+    /**
+     * The query string.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly query: URLSearchParams;
+    /**
+     * The fields of a posted form. Empty for `GET`.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly form: Readonly<Record<string, string>>;
+    /**
+     * Aborted when the browser stops waiting.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly signal: AbortSignal;
+    /**
+     * The context for document reads and writes. It ends when the handler returns.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly context: Context;
+    /**
+     * Reads committed documents.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly snapshot: DocumentReader["snapshot"];
+    /**
+     * Changes the module's own documents. Refused after the handler returns.
+     * @since 0.22.0
+     * @experimental
+     */
+    commit<T>(change: (tx: Tx) => T | Promise<T>): Promise<T>;
+}
+
+/**
+ * A public page's answer: its HTML, or its HTML with a status (200 when not given).
+ * @since 0.22.0
+ * @experimental
+ */
+export type PublicPageAnswer = string | { html: string; status?: number };
+
+/**
+ * Draws a module's public pages.
+ * @since 0.22.0
+ * @experimental
+ */
+export type PublicPageHandler = (
+    request: PublicPageRequest,
+) => PublicPageAnswer | Promise<PublicPageAnswer>;
+
+/**
  * What a module adds to the app: the second argument of its default export. Register routes, the browser module, and
  * commands while the module loads. They go when this version of the module goes.
  * @since 0.14.0
@@ -588,6 +1292,55 @@ export interface Web {
      * @since 0.14.0
      */
     onDispose(dispose: () => unknown): void;
+    /**
+     * Draws the module's public pages: what anyone with one of its links sees at `/l/<token>`, with no sign-in. One
+     * handler for each module.
+     * @since 0.22.0
+     * @experimental
+     */
+    publicPage(handle: PublicPageHandler): void;
+    /**
+     * Makes, lists, and ends the module's public links. It works while the module runs, not only while it loads.
+     * @since 0.22.0
+     * @experimental
+     */
+    readonly links: PublicLinks;
+    /**
+     * Offers other modules an object of this module's own, which they get with `web.use(module)`. One for each module, while it loads.
+     * @since 0.22.0
+     * @experimental
+     */
+    provide(service: object): void;
+    /**
+     * The service that a module that is on offers now, or `undefined`. Ask again each time that you need it: a reload replaces it.
+     * @since 0.22.0
+     * @experimental
+     */
+    use(module: string): unknown;
+    /**
+     * Calls `listener` when a module's service comes, changes, or goes. Returns how to stop. It stops when this version of the module goes.
+     * @since 0.22.0
+     * @experimental
+     */
+    onService(module: string, listener: () => void): () => void;
+    /**
+     * Declares the module's settings, while it loads. Core keeps the owner's values, and shows the settings in the Extensions sheet.
+     * @since 0.22.0
+     * @experimental
+     */
+    settings(fields: readonly SettingField[]): void;
+    /**
+     * A setting's value now: the owner's, or its default.
+     * @since 0.22.0
+     * @experimental
+     */
+    setting(name: string): SettingValue | undefined;
+    /**
+     * Calls `listener` when the owner changes the module's settings. Returns how to stop. It stops when this version of the module goes.
+     * @since 0.22.0
+     * @experimental
+     */
+    onSettings(listener: () => void): () => void;
 }
 
 // ─── Commands ────────────────────────────────────────────────────────────────
@@ -1772,6 +2525,22 @@ export interface Pocket {
      * @since 0.14.0
      */
     on<T = unknown>(event: string, run: (data: T) => void): () => void;
+    /**
+     * The module's settings as the person in this tab may read them. A secret's value is left out: `set` says whether it is set.
+     * @since 0.22.0
+     * @experimental
+     */
+    settings(): Promise<{
+        fields: SettingField[];
+        values: Record<string, SettingValue | null>;
+        set: string[];
+    }>;
+    /**
+     * Calls `run` when the owner changes the module's settings. Returns a function that stops it.
+     * @since 0.22.0
+     * @experimental
+     */
+    onSettings(run: () => void): () => void;
     /**
      * Shows a notice, as the app's own.
      * @since 0.14.0

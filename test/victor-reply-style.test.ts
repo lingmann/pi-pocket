@@ -191,6 +191,35 @@ test("voice/text/voice switching reaches the model and the extension can be disa
     assertText(seen.at(-1)!);
 });
 
+test("a Victor retry returns prepared text without replacing the original input or source", async (t) => {
+    const seen: Seen[] = [];
+    const { app, id } = await fixture(t, (request) => {
+        seen.push(observe(request));
+
+        return answer();
+    });
+    const key = crypto.randomUUID();
+    const first = await submit(app, id, { text: "Original typed message", requestId: key });
+
+    await wait(app, first.submissionId);
+    app.hidden.add({ value: "private-token", label: "secret TOKEN" });
+    const retry = await submit(app, id, {
+        text: "Retry private-token",
+        requestId: key,
+        source: "victor",
+    });
+
+    assert.equal(retry.submissionId, first.submissionId);
+    assert.equal(retry.acceptedText, "Retry [secret TOKEN]");
+    assert.equal(seen.length, 1);
+    assertText(seen[0]!);
+    assert.match(seen[0]!.text, /Original typed message/);
+    assert.equal(
+        (await app.harness.snapshot(InputSourceDoc, id, first.requestId, context))?.source,
+        "text",
+    );
+});
+
 test("duplicate requests keep the original source and submission, including concurrent conflicting retries", async (t) => {
     const seen: Seen[] = [];
     const { app, id } = await fixture(t, (request) => {
@@ -755,7 +784,7 @@ test("a retry cannot label an existing untagged submission as Victor", async (t)
     assert.equal(await app.harness.snapshot(InputSourceDoc, id, canonical, context), undefined);
 });
 
-test("HTTP validates source, keeps access checks, and treats ordinary dictation as text", async (t) => {
+test("HTTP validates source, redacts Victor text, and treats ordinary dictation as text", async (t) => {
     const seen: Seen[] = [];
     const { app, id } = await fixture(t, (request) => {
         seen.push(observe(request));
@@ -773,6 +802,7 @@ test("HTTP validates source, keeps access checks, and treats ordinary dictation 
                 server.close((error) => (error ? reject(error) : resolve())),
             ),
     );
+    app.hidden.add({ value: "private-token", label: "secret TOKEN" });
     const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/c/${id}/submit`;
     const send = (source: unknown, token = app.config.ownerToken) =>
         fetch(url, {
@@ -783,7 +813,7 @@ test("HTTP validates source, keeps access checks, and treats ordinary dictation 
                 "x-pocket": "1",
             },
             body: JSON.stringify({
-                text: "Dictated or spoken",
+                text: "Use private-token",
                 requestId: crypto.randomUUID(),
                 source,
             }),
@@ -801,10 +831,19 @@ test("HTTP validates source, keeps access checks, and treats ordinary dictation 
         const response = await send(source);
 
         assert.equal(response.status, 200);
-        await wait(app, (await response.json()).submissionId);
+        const result = await response.json();
+
+        assert.equal(result.acceptedText, source === "victor" ? "Use [secret TOKEN]" : undefined);
+        assert.ok(!JSON.stringify(result).includes("private-token"));
+        await wait(app, result.submissionId);
     }
 
     assert.equal(seen.length, 2);
     assertVoice(seen[0]!);
     assertText(seen[1]!);
+
+    for (const request of seen) {
+        assert.match(request.text, /Use \[secret TOKEN\]/);
+        assert.doesNotMatch(request.text, /private-token/);
+    }
 });
