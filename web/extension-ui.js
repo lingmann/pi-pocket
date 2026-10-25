@@ -1773,8 +1773,8 @@ export function browserModuleState(module) {
 // ─── Where they show ─────────────────────────────────────────────────────────
 
 /**
- * The rail's buttons that extensions added, after the app's own tools: a group that scrolls when they are many, so the
- * folded rail's sessions keep their room.
+ * The rail's buttons that extensions added, after the app's own tools. They take the room they need: a rail with more
+ * buttons than room scrolls as a whole, and fades the edge where more is (`useScrollMore`).
  */
 export function ExtensionRailButtons() {
     const buttons = added("rail");

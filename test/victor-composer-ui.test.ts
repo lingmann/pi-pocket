@@ -54,6 +54,11 @@ before(async () => {
         pocket.composerKey({ id: "late", keys: "Ctrl+E", label: "Delayed edit", run(box) {
             return new Promise(resolve => { window.finishKey = () => { box.set("Late draft"); resolve(); }; });
         } });
+        window.addVictorButtons = count => {
+            for (let i = 0; i < count; i++) {
+                pocket.composerButton({ id: 'layout-' + i, title: 'Layout button ' + i, icon: 'pulse', run() {} });
+            }
+        };
         window.victorKeysLoaded = true;
     };`,
     );
@@ -717,6 +722,103 @@ test(
         }
     },
 );
+
+test("Victor and extension buttons fit across composer breakpoints", real, async () => {
+    await page.setViewport({ width: 600, height: 844, scale: 1, mobile: true });
+
+    for (const count of [1, 2]) {
+        for (const width of [340, 341, 480, 481]) {
+            await fresh();
+            await see(`window.victorKeysLoaded === true`);
+            await run(`
+                addVictorButtons(${count});
+                document.querySelector('.composer').style.width = '${width + 2}px';
+            `);
+            await see(`document.querySelectorAll('.ext-composer-button').length === ${count}`);
+
+            for (const busy of [false, true]) {
+                await run(
+                    `pocket.store.set({ view: { ...pocket.store.state.view, live: { busy: ${busy} } } })`,
+                );
+                await layout();
+                const measured = await value(`(() => {
+                    const box = document.querySelector('.composer');
+                    const row = box.querySelector('.composer-row');
+                    const bounds = row.getBoundingClientRect();
+                    const controls = [...row.querySelectorAll('button')].filter(button => button.getClientRects().length);
+                    const chip = row.querySelector('.victor-chip');
+                    const rect = chip?.getBoundingClientRect();
+                    return {
+                        width: box.clientWidth,
+                        overflow: row.scrollWidth > row.clientWidth,
+                        contained: controls.every(button => {
+                            const r = button.getBoundingClientRect();
+                            return r.left >= bounds.left - 1 && r.right <= bounds.right + 1;
+                        }),
+                        chip: !!rect && rect.width > 0,
+                        extensions: controls.filter(button => button.matches('.ext-composer-button')).length,
+                        above: !chip || chip.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.top - 4)),
+                        below: !chip || chip.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.bottom + 4)),
+                        extensionHits: controls.filter(button => button.matches('.ext-composer-button')).every(button => {
+                            const r = button.getBoundingClientRect();
+                            return button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+                        }),
+                    };
+                })()`);
+                const context = JSON.stringify({ width, count, busy, measured });
+
+                assert.equal(measured.width, width, context);
+                assert.equal(measured.overflow, false, context);
+                assert.equal(measured.contained, true, context);
+                assert.equal(measured.chip, !busy, context);
+                assert.equal(
+                    measured.extensions,
+                    busy && count === 1 && width > 340 && width <= 480 ? 0 : count,
+                    context,
+                );
+                assert.equal(measured.above, true, context);
+                assert.equal(measured.below, true, context);
+                assert.equal(measured.extensionHits, true, context);
+            }
+
+            await run(
+                `pocket.store.set({ view: { ...pocket.store.state.view, live: { busy: false } } })`,
+            );
+            await type("Typed");
+            await activate("spoken");
+            fits(await layout(), 600, `${width}px with ${count} buttons listening`);
+            await run(`document.querySelector('.victor-toggle').click()`);
+            await phase("off");
+            await see(`document.querySelector('.composer textarea').value === 'Typed spoken'`);
+        }
+    }
+});
+
+test("extension buttons preserve Victor controls while waiting for a reply", real, async () => {
+    await page.setViewport(VIEWPORTS.mobile);
+    await fresh();
+    await see(`window.victorKeysLoaded === true`);
+    await run(`addVictorButtons(2)`);
+    await see(`document.querySelectorAll('.ext-composer-button').length === 2`);
+    await activate("");
+    await beginVoiceSubmit();
+    await run(`pocket.store.set({ view: { ...pocket.store.state.view, live: { busy: true } } })`);
+    await endVoiceSubmit(200);
+    await phase("waiting");
+    fits(await layout(), VIEWPORTS.mobile.width, "waiting with extension buttons");
+    assert.equal(await value(`document.querySelector('.composer textarea').readOnly`), true);
+    assert.equal(await value(`document.querySelector('.attach-button').disabled`), true);
+    assert.equal(await value(`document.querySelector('.send-button').disabled`), true);
+    assert.equal(
+        await value(`document.querySelector('.stop-button').getBoundingClientRect().width > 0`),
+        true,
+    );
+    await page.click({ selector: ".victor-toggle" });
+    await phase("off");
+    assert.equal(await value(`document.querySelector('.composer textarea').readOnly`), false);
+    assert.equal(await value(`document.querySelector('.composer textarea').value`), "");
+    await run(`pocket.store.set({ view: { ...pocket.store.state.view, live: { busy: false } } })`);
+});
 
 test("reordered composer slots preserve Victor ownership and its stop control", real, async () => {
     await fresh();

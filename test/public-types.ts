@@ -64,6 +64,7 @@ type Internal =
     | "pip"
     | "pipCompaction"
     | "gallery"
+    | "updates"
     | "watches"
     | "repoWatches"
     | "approvals"

@@ -88,6 +88,7 @@ import { type GuardStatus, LancetGuard } from "./lancet.ts";
 import { takeLock } from "./lock.ts";
 import { Memory } from "./memory.ts";
 import { isThinkingLevel, modelInfo, modelList, resolveModel, THINKING_LEVELS } from "./models.ts";
+import { Updates } from "./updates.ts";
 import { pocketVersion } from "./versions.ts";
 import { configureHttp } from "./net.ts";
 import { createPublicFetch } from "./public-fetch.ts";
@@ -266,6 +267,10 @@ export interface OpenOptions {
     browser?: string | null;
     /** The home folder, whose `.agents/skills/` every session has. Undefined is Pi's: `$HOME`. Tests use their own. */
     home?: string;
+    /** Restart the server, as Menu → Restart server does (`main.ts`); undefined where nothing can (tests). */
+    restart?: () => void;
+    /** Where Pi Pocket's own code is, for its updates; tests give a checkout of their own. */
+    appRoot?: string;
 }
 
 export class PocketApp {
@@ -332,6 +337,8 @@ export class PocketApp {
     readonly commandEnvs = new CommandEnvs((line) => this.#log(line));
     /** Other people's drop-ins, from a reviewed index: found, installed off, read, updated, removed (`gallery.ts`). */
     readonly gallery = new Gallery(this);
+    /** Updates of Pi Pocket itself: the newest release, and updating to it (`updates.ts`). */
+    readonly updates: Updates;
     /** Theme folders: the app's look and layout, built in and the owner's (`themes.ts`). */
     readonly themes: Themes;
     /** Each conversation's browser page, which Pi and the people in the conversation share. */
@@ -393,6 +400,23 @@ export class PocketApp {
         this.dataDir = options.dataDir;
         this.defaultCwd = options.defaultCwd;
         this.supervised = options.supervised;
+        this.updates = new Updates({
+            appRoot: options.appRoot ?? APP_ROOT,
+            version: pocketVersion(),
+            checkOnly:
+                "Self-update is disabled in the Victor fork. Merge upstream changes through the fork workflow.",
+            supervised: options.supervised && options.restart !== undefined,
+            // The launcher says so when it goes back to the version before a new one that does not start.
+            rollback: process.env.PI_POCKET_ROLLBACK === "1",
+            restart: () => options.restart?.(),
+            quiesce: (paused) => this.pauseReloads(paused),
+            busy: () => this.#busy.size,
+            log: (line) => this.#log(line),
+            // Releases from somewhere else: a fork's, or a copy of Pi Pocket's repository to try updates on.
+            ...(process.env.PI_POCKET_UPDATES_REPO
+                ? { repository: process.env.PI_POCKET_UPDATES_REPO }
+                : {}),
+        });
         this.config = new ConfigStore(options.dataDir);
         this.#lockFile = join(options.dataDir, "harness.lock");
         this.#log = options.log ?? ((line) => console.log(line));
@@ -598,6 +622,15 @@ export class PocketApp {
         }, 50);
     }
 
+    /** While an update moves Pi Pocket's checkout, edited web files and modules load nothing (`updates.ts`). */
+    reloadsPaused = false;
+
+    pauseReloads(paused: boolean): void {
+        this.reloadsPaused = paused;
+        this.loader?.pause(paused);
+        this.themes?.pause(paused);
+    }
+
     /** Write a line to the server log. */
     log(line: string): void {
         this.#log(line);
@@ -732,6 +765,7 @@ export class PocketApp {
             repoWatches: this.repoWatches,
             memory: this.memory,
             gallery: this.gallery,
+            updates: this.updates,
             text: Object.freeze({ quoted, defang }),
             thinkingLevels: THINKING_LEVELS,
         };

@@ -44,7 +44,9 @@ The launcher asks how your devices should connect, then prints a sign-in link an
 
 While it runs: **q** quit · **r** restart server · **a** change access · **o** open in browser · **s** show QR code.
 
-**Updating:** stop the server, back up `~/.pi-pocket`, pull, run `npm install`, and start again. Read the [release notes](https://github.com/TannerMidd/pi-pocket/releases) first: 0.21.0 upgrades the database one way, so going back needs the backup.
+**Victor fork:** self-update is disabled. The update sheet only reports upstream releases for manual review; use the [fork workflow](docs/fork-workflow.md) and [Victor deployment steps](docs/victor.md#updates). The automatic update behavior below describes upstream Pi Pocket.
+
+**Updating:** Menu → **Update Pi Pocket** updates a git checkout run with `npm start` and restarts, and goes back by itself if the new version does not start ([features](docs/features.md)). By hand: stop the server, back up `~/.pi-pocket`, pull, run `npm install`, and start again. Read the [release notes](https://github.com/TannerMidd/pi-pocket/releases) first: 0.21.0 upgrades the database one way, so going back needs the backup.
 
 ### Other ways to run it
 
