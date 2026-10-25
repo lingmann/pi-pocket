@@ -83,6 +83,12 @@ Later activations reuse cached assets but still take time to initialize. Updates
 
 ## Updates
 
+**Pi Pocket updates are check-only in this fork.** Menu → **Update Pi Pocket** shows newer upstream releases and their notes for manual review. Checks run 2 minutes after startup and every 6 hours while **Look for new versions** is on. They do not fetch release commits, install packages, change the checkout, or restart the server. The install button stays disabled, the automatic-install setting is absent, and the server rejects installation requests even if an old setting enabled them. These notices compare the incorporated upstream version, not `victor/vX.Y.Z` releases.
+
+Merge upstream through [the fork workflow](fork-workflow.md), then deploy the reviewed fork manually. `PI_POCKET_UPDATES_REPO` can change the discovery source, but cannot enable installation. The upstream update and rollback code remains in place to keep future merges small; Victor does not initiate those updates.
+
+When deploying 0.23.0, stop and start the complete launcher to load its changes; **Restart server** alone does not reload the launcher. There is no new database migration or dependency change in this release.
+
 Preparation installs the versions pinned in `victor-sources.json`; it does not choose newer models automatically. Model changes need compatibility testing before use.
 
 After installing an update that changes Victor's server code or assets:
@@ -170,6 +176,10 @@ These are integration hooks and shared dependencies, not files owned exclusively
 
 Victor's input-source records and reply-style settings declare the checkpoint policies required by Pi Durable 1.4.0. Both write a new base after 64 stored deltas; document kinds, versions, scopes, history, and fork behavior remain unchanged. Configuration tests cover repeated writes across this boundary, reopening the store, and resetting the override.
 
+### Check-only update boundary
+
+`src/server/app.ts` sets the `UpdatesOptions.checkOnly` explanation unconditionally. `src/server/updates.ts` skips release preparation and installation-specific status checks in this mode, reports that explanation as the blocker, and rejects `apply` before discovery or side effects. `src/server/host.ts` exposes the policy to `src/server/extensions/updates.ts`, which omits the automatic-install setting. The existing browser module uses the blocker to disable installation; keep its UI and upstream recovery implementation unchanged.
+
 ### Composer handoff boundary
 
 Keep fork-specific lifecycle rules in `web/victor-composer.js`, not in the shared composer. The adapter receives synchronous draft read, expand, and write operations; writing expanded text must clear old paste mappings before notifying a mounted composer. The composer retains its existing storage keys, paste syntax, file-mention detection, and UI setters. Do not copy those formats into the adapter.
@@ -179,6 +189,8 @@ The shared composer passes Victor's active state to its button slot so Attach st
 The controller's `enable` contract documents when validation, consumption, and preservation run. Consumption precedes each POST and throws if the stored draft no longer matches the handed-off copy. Preservation can outlive the originating component: the adapter replaces its predecessor or appends to newer expanded text, then notifies only the mounted composer for that conversation. Uncertain delivery does not restore submitted text. `blocksSend(conversationId)` protects the originating draft while the separate activation guard remains tab-wide.
 
 ### Focused test coverage
+
+[`victor-updates.test.ts`](../test/victor-updates.test.ts) covers check-only release discovery without fetching commits, direct and HTTP installation refusal, scheduled checks with a stale auto-install setting, and settings after extension reload. Keep upstream updater and route coverage in `updates.test.ts` and `updates-routes.test.ts`.
 
 This is a starting point for selecting tests by affected behavior, not a requirement to run every listed suite. Changes to a shared contract also need its upstream tests. Keep failure signatures and their baseline evidence in [TEST_ISSUES.md](../TEST_ISSUES.md), not in this map.
 

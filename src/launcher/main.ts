@@ -26,6 +26,8 @@ import {
     tailscaleAddress,
 } from "./access.ts";
 import { fail, parseArgs } from "./options.ts";
+// The one server module the launcher runs itself: it imports only Node's own, so an update cannot break the launcher.
+import { readPending, rollBackUpdate, stopMeansRollBack } from "../server/update-state.ts";
 import {
     accent,
     bold,
@@ -46,7 +48,11 @@ import {
 } from "./term.ts";
 
 const SERVER = fileURLToPath(new URL("../server/main.ts", import.meta.url));
+/** Pi Pocket's checkout, which an update from the app changes (`src/server/updates.ts`). */
+const APP_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const RESTART_CODE = 75;
+/** How long a server started with an update under way may take to be ready before it counts as not starting. */
+const UPDATE_START_LIMIT_MS = 5 * 60_000;
 
 // ─── Options ────────────────────────────────────────────────────────────
 
@@ -457,8 +463,29 @@ function startServer(first: boolean): void {
     // Node 22 calls node:sqlite experimental and says so at every start, right above the panel.
     const proc = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", ...args], {
         stdio: ["ignore", "pipe", "pipe", "ipc"],
-        env: { ...process.env, PI_POCKET_SUPERVISED: "1", PI_POCKET_LAUNCHER: "1" },
+        // PI_POCKET_ROLLBACK: this launcher goes back to the version before an update that does not start.
+        env: {
+            ...process.env,
+            PI_POCKET_SUPERVISED: "1",
+            PI_POCKET_LAUNCHER: "1",
+            PI_POCKET_ROLLBACK: "1",
+        },
     });
+    /** This start said it was ready: a stop after that is not a new version that cannot start. */
+    let ready = false;
+    // A new version that hangs before it is ready never exits: stop it, so the exit goes back to the version before.
+    const watchdog = readPending(APP_ROOT)
+        ? setTimeout(() => {
+              if (!ready && child === proc) {
+                  log(
+                      yellow(
+                          `  The server did not get ready in ${UPDATE_START_LIMIT_MS / 60_000} minutes after an update: stopping it.`,
+                      ),
+                  );
+                  proc.kill("SIGKILL");
+              }
+          }, UPDATE_START_LIMIT_MS)
+        : undefined;
 
     child = proc;
     pipeLines(proc.stdout, (line) => log(line));
@@ -467,6 +494,9 @@ function startServer(first: boolean): void {
         if (message?.type !== "ready" || child !== proc) {
             return;
         }
+
+        ready = true;
+        clearTimeout(watchdog);
 
         state.loginPath = message.loginPath;
         state.serverReady = true;
@@ -489,6 +519,8 @@ function startServer(first: boolean): void {
     });
 
     const exited = (code: number | null, signal: NodeJS.Signals | null) => {
+        clearTimeout(watchdog);
+
         if (child !== proc) {
             return;
         }
@@ -498,6 +530,30 @@ function startServer(first: boolean): void {
 
         if (quitting) {
             return;
+        }
+
+        // A server that stops before it is ready, with an update from the app under way: the new version does not
+        // start. Go back to the version before, and start that one, also on a first start.
+        if (stopMeansRollBack(ready, code)) {
+            let undone: string | undefined;
+
+            try {
+                undone = rollBackUpdate(APP_ROOT);
+            } catch (error) {
+                // The update stays noted: the next try, after the usual pause, tries going back again.
+                log(
+                    red(
+                        `  Going back to the version before the update failed: ${(error as Error).message}`,
+                    ),
+                );
+            }
+
+            if (undone !== undefined) {
+                log(yellow(`  ${undone}`));
+                startServer(false);
+
+                return;
+            }
         }
 
         if (code === RESTART_CODE) {

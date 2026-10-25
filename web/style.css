@@ -3422,9 +3422,73 @@ pre.diff .del {
     }
 }
 
-/* Below a 360 px screen (an iPhone SE is 320 px), Steer, Queue, and Interrupt would push Stop out of the box: while Pi
- * works, Attach goes and the three get closer. Attach comes back when Pi stops. A 360 px screen's box is 334 px. */
-@container composer (max-width: 333px) {
+/* The buttons that extensions add to the row: any number of them can come. Where they would push Send (or Stop) out of a
+ * narrow box (two or more up to 480 px, one up to 340 px), they take a line of their own under the row, where they stay
+ * while Pi works. The break is the row's `::after`: a line of no height, so only the buttons' margin parts the lines. A
+ * wrapping row breaks before an item that is too wide, not after shrinking one: the model asks for no room, so Send
+ * stays on the first line, then takes what is left, up to its whole name. */
+@container composer (max-width: 480px) {
+    .composer-row:has(.ext-composer-button ~ .ext-composer-button) {
+        flex-wrap: wrap;
+        row-gap: 0;
+    }
+
+    .composer-row:has(.ext-composer-button ~ .ext-composer-button) .model-chip {
+        flex: 100 1 0;
+        max-width: max-content;
+    }
+
+    .composer-row:has(.ext-composer-button ~ .ext-composer-button)::after {
+        content: "";
+        order: 1;
+        flex-basis: 100%;
+        height: 0;
+    }
+
+    .composer-row:has(.ext-composer-button ~ .ext-composer-button) .ext-composer-button {
+        order: 2;
+        margin-top: 4px;
+    }
+}
+
+@container composer (max-width: 340px) {
+    .composer-row:has(.ext-composer-button) {
+        flex-wrap: wrap;
+        row-gap: 0;
+    }
+
+    .composer-row:has(.ext-composer-button) .model-chip {
+        flex: 100 1 0;
+        max-width: max-content;
+    }
+
+    .composer-row:has(.ext-composer-button)::after {
+        content: "";
+        order: 1;
+        flex-basis: 100%;
+        height: 0;
+    }
+
+    .composer-row:has(.ext-composer-button) .ext-composer-button {
+        order: 2;
+        margin-top: 4px;
+    }
+}
+
+/* One button, on its line in the row: while Pi works it steps aside on a narrow box, so Steer, Queue, Interrupt, and
+ * Stop stay inside it. It shows again after. */
+@container composer (340px < width <= 480px) {
+    .composer.busy
+        .composer-row:not(:has(.ext-composer-button ~ .ext-composer-button))
+        .ext-composer-button {
+        display: none;
+    }
+}
+
+/* On a screen up to 360 px wide (an iPhone SE is 320 px; a 360 px screen's box is 334 px, and the row needs 335), Steer,
+ * Queue, and Interrupt would push Stop out of the box: while Pi works, Attach goes and the three get closer. Attach
+ * comes back when Pi stops. */
+@container composer (max-width: 340px) {
     .composer.busy .composer-row .attach-button {
         display: none;
     }
@@ -3432,6 +3496,27 @@ pre.diff .del {
     .composer.busy .mode-switch button {
         padding-inline: 6px;
     }
+}
+
+/* Whatever else takes room in the row, Stop, Send, and the mic keep theirs, and the three modes give way: their labels
+ * are cut before Stop leaves the box. Cut sideways only: a touch screen's taller tap layer (`::before`, below) reaches
+ * above and below each mode, and a clip there would take it away. */
+.composer.busy .composer-row :is(.stop-button, .send-button, .composer-mic) {
+    flex: none;
+}
+
+.composer.busy .mode-switch {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow-x: clip;
+}
+
+.composer.busy .mode-switch button {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow-x: clip;
+    white-space: nowrap;
+    text-overflow: ellipsis;
 }
 
 .chip {
@@ -3954,10 +4039,71 @@ pre.diff .del {
     min-height: 0;
     padding: calc(env(safe-area-inset-top) + 12px) 0 calc(env(safe-area-inset-bottom) + 12px);
     border-right: 1px solid var(--hair);
-    /* A short screen (a phone on its side) scrolls the rail rather than cut off its last buttons. */
+    /* A rail with more buttons than room (a short screen, many extensions) scrolls as a whole rather than cut off its
+       last buttons; its hidden scrollbar's place is taken by a fade at the edge where more is (below). */
     overflow-x: hidden;
     overflow-y: auto;
+    overscroll-behavior: contain;
     scrollbar-width: none;
+}
+
+.rail::-webkit-scrollbar,
+.rail-items::-webkit-scrollbar {
+    display: none;
+}
+
+/*
+ * A scroller with more than it shows fades at that edge (`data-more`, set by `useScrollMore`): the buttons there melt
+ * away, so the rail says it scrolls though it has no scrollbar. The lines at its edges (the rail's on its right, the
+ * sessions' above and below them) do not fade.
+ */
+:is(.rail, .rail-items)[data-more] {
+    /* Long and steep enough that the button at the edge shows half faded: plainly cut off, still there. At most 30% of
+       a short scroller (the folded sessions on a phone on its side), so a fade at each end leaves its middle clear. */
+    --more-fade: min(64px, 30%);
+    mask-image: var(--more-mask), linear-gradient(#000, #000);
+    mask-size:
+        100% 100%,
+        1px 100%;
+    mask-position:
+        0 0,
+        right 0 top 0;
+    mask-repeat: no-repeat;
+}
+
+.rail-items[data-more] {
+    mask-image: var(--more-mask), linear-gradient(#000, #000), linear-gradient(#000, #000);
+    mask-size:
+        100% 100%,
+        100% 1px,
+        100% 1px;
+    mask-position:
+        0 0,
+        0 0,
+        0 100%;
+}
+
+:is(.rail, .rail-items)[data-more="down"] {
+    --more-mask: linear-gradient(
+        #000 calc(100% - var(--more-fade)),
+        rgb(0 0 0 / 0.25) calc(100% - 20px),
+        transparent
+    );
+}
+
+:is(.rail, .rail-items)[data-more="up"] {
+    --more-mask: linear-gradient(transparent, rgb(0 0 0 / 0.25) 20px, #000 var(--more-fade));
+}
+
+:is(.rail, .rail-items)[data-more="both"] {
+    --more-mask: linear-gradient(
+        transparent,
+        rgb(0 0 0 / 0.25) 20px,
+        #000 var(--more-fade),
+        #000 calc(100% - var(--more-fade)),
+        rgb(0 0 0 / 0.25) calc(100% - 20px),
+        transparent
+    );
 }
 
 .rail-brand,
@@ -4105,7 +4251,12 @@ pre.diff .del {
 .rail-items {
     position: relative;
     flex: 1;
-    min-height: 0;
+    /* The sessions come first: room for all of them (`--tiles`, their count), up to a third of the window. What does not
+       fit beside them, the rail scrolls as a whole, as it does unfolded. */
+    min-height: min(
+        calc(var(--tiles, 2) * 36px + 2 * 6px + 2px),
+        max(2 * 36px + 2 * 6px + 2px, 33vh)
+    );
     width: 100%;
     overflow-y: auto;
     overflow-x: hidden;
@@ -4117,10 +4268,6 @@ pre.diff .del {
     border-top: 1px solid var(--hair);
     border-bottom: 1px solid var(--hair);
     scrollbar-width: none;
-}
-
-.rail:has(.rail-items) {
-    overflow-y: hidden;
 }
 
 /* The open session's tile is lit by a soft fill that slides from tile to tile, under the numbers. */
@@ -5697,9 +5844,14 @@ button.session-chip {
         /* A sheet keeps 16px from the sides, and clear of a notch. */
         padding: 7vh max(16px, var(--inset-r)) 16px max(16px, var(--inset-l));
     }
-    /* The drawer keeps its place, and its rail clears the notch itself (below). */
+    /* The drawer keeps its place, and its rail clears the notch itself (below). It fills the room inside the margins,
+       not the whole screen's height, which would put its foot below the screen (a phone on its side). */
     .overlay.drawer-overlay {
         padding-left: 16px;
+    }
+    .overlay.drawer-overlay .drawer {
+        height: auto;
+        border-radius: var(--r-sheet);
     }
     .sheet {
         max-width: 500px;
@@ -14075,31 +14227,19 @@ textarea.notes {
 }
 
 /*
- * Extensions' rail buttons, together: four buttons' height at most, past which they scroll rather than push the app's
- * own buttons away. Beside the session list it keeps that height, and a short window scrolls the whole rail, as it does
- * the app's own buttons; in the folded rail it gives way first (to one button), so the sessions' tiles keep their room.
+ * Extensions' rail buttons, together, after the app's own tools: they take the room they need, and a rail with more
+ * buttons than room scrolls as a whole (above).
  */
 .rail-exts {
     flex: none;
-    max-height: calc(4 * 44px + 3 * 4px);
     width: 100%;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 4px;
-    overflow-x: hidden;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    scrollbar-width: none;
 }
 
-.rail:has(.rail-items) .rail-exts {
-    flex: 0 1 auto;
-    min-height: 44px;
-    max-height: max(44px, min(4 * 44px + 3 * 4px, 22vh));
-}
-
-/* Inside the button, where the group's edge does not cut it off. */
+/* Inside the button, where the rail's edge does not cut it off. */
 .rail-exts .rail-button:focus-visible {
     outline-offset: -1px;
 }

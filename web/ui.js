@@ -1271,6 +1271,61 @@ export function useEdge(name, measure) {
 }
 
 /**
+ * Say where a scroller has more than it shows: `data-more` is "up", "down", or "both" while it can scroll that way, and
+ * gone while everything shows. The stylesheet fades that edge, so a list whose scrollbar is hidden still says it
+ * scrolls. It follows scrolling, the scroller's size, and what is added to it or taken away. Returns a ref callback:
+ * give it to the scroller as its `ref`.
+ */
+export function useScrollMore() {
+    const [ref] = useState(() => {
+        let stop = null;
+
+        const watch = (element) => {
+            let frame = 0;
+
+            const update = () => {
+                frame = 0;
+                const up = element.scrollTop > 1;
+                const down = element.scrollTop + element.clientHeight < element.scrollHeight - 1;
+                const more = up && down ? "both" : up ? "up" : down ? "down" : null;
+
+                if (more === null) {
+                    element.removeAttribute("data-more");
+                } else if (element.dataset.more !== more) {
+                    element.dataset.more = more;
+                }
+            };
+
+            const later = () => {
+                frame ||= requestAnimationFrame(update);
+            };
+
+            const sizes = new ResizeObserver(later);
+            const content = new MutationObserver(later);
+
+            sizes.observe(element);
+            content.observe(element, { childList: true, subtree: true });
+            element.addEventListener("scroll", later, { passive: true });
+            later();
+
+            return () => {
+                cancelAnimationFrame(frame);
+                sizes.disconnect();
+                content.disconnect();
+                element.removeEventListener("scroll", later);
+            };
+        };
+
+        return (element) => {
+            stop?.();
+            stop = element ? watch(element) : null;
+        };
+    });
+
+    return ref;
+}
+
+/**
  * Keep showing a value for `ms` after it goes away (null or undefined), so what it shows can animate out. Returns the
  * value to show and whether it is leaving.
  */

@@ -79,6 +79,8 @@ Authors may tidy their own branches, not rewrite another developer's shared work
 
 Release from `main` after `git pull --ff-only` and confirmation that it has passed the required GitHub checks and any manual release checks; `just release 0.1.0` annotates and pushes only the new `victor/vX.Y.Z` tag after its safety guards and never deploys.
 
+The app's **Update Pi Pocket** sheet is advisory in this fork: it reports upstream releases but cannot install them. Continue using the upstream-update PR workflow above, then deploy the reviewed fork and prepare its assets as described in [Victor updates](victor.md#updates).
+
 ## Release versioning
 
 Use **independent Semantic Versioning** for fork releases, tagged `victor/vX.Y.Z`. Choose the bump from changes to the fork, not upstream's version number. Record the incorporated upstream commit and release version, when applicable, in release notes.

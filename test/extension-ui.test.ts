@@ -675,6 +675,237 @@ test("Lancet Guard stays on until its inline confirmation is accepted", real, as
     );
 });
 
+test(
+    "Send, and while Pi works Stop, stay inside the message box on every phone width, with extension buttons and with more",
+    real,
+    async () => {
+        const busy = (on: boolean) =>
+            page.evaluate(`
+                const { store } = await import("/store.js");
+                store.set((state) => ({ view: { ...state.view, live: { ...state.view.live, busy: ${on} } } }));
+                for (let frame = 0; frame < 3; frame++) {
+                    await new Promise((resolve) => requestAnimationFrame(resolve));
+                }
+            `);
+        const fit = () =>
+            inPage<{
+                scroll: number;
+                client: number;
+                stop: number;
+                send: number;
+                right: number;
+                shown: number;
+                below: boolean;
+            }>(`
+                const row = document.querySelector(".composer-row");
+                const stop = row.querySelector(".stop-button")?.getBoundingClientRect();
+                const send = row.querySelector(".send-button")?.getBoundingClientRect();
+                const shown = [...row.querySelectorAll(".ext-composer-button")].filter((each) => each.offsetWidth > 0);
+                const end = (stop ?? send).bottom;
+
+                return JSON.stringify({
+                    scroll: row.scrollWidth,
+                    client: row.clientWidth,
+                    stop: stop?.right ?? 0,
+                    send: send?.right ?? 0,
+                    right: row.getBoundingClientRect().right,
+                    shown: shown.length,
+                    below: shown.every((each) => each.getBoundingClientRect().top >= end),
+                });
+            `);
+
+        const inside = (width: number, what: string, f: Awaited<ReturnType<typeof fit>>) => {
+            assert.ok(
+                f.scroll <= f.client,
+                `${what}: the row overflows at ${width} px: ${JSON.stringify(f)}`,
+            );
+            assert.ok(
+                f.stop > 0 && f.stop <= f.right,
+                `${what}: Stop is out of the row at ${width} px: ${JSON.stringify(f)}`,
+            );
+        };
+
+        try {
+            for (const width of [320, 360, 375, 390, 412, 430]) {
+                await page.setViewport({ width, height: 700, scale: 2, mobile: true });
+                await page.navigate(`${base}/s/${session}`);
+                await until(() => has(".composer-row"), "the message box");
+                await withMeter(`
+                    for (const id of ["a", "b", "c"]) {
+                        pocket.composerButton({ id, title: "Tool " + id, icon: "pulse", run: () => {} });
+                    }
+
+                    return "null";
+                `);
+                await until(() => has(".ext-composer-button"), "the extension's buttons");
+
+                // Idle: three buttons would push Send out of a phone's box: they take a line under it.
+                const idle = await fit();
+
+                assert.ok(
+                    idle.scroll <= idle.client && idle.send > 0 && idle.send <= idle.right,
+                    `Send is out of the row at ${width} px: ${JSON.stringify(idle)}`,
+                );
+                assert.equal(idle.shown, 3, `the buttons show at ${width} px`);
+                assert.ok(idle.below, `the buttons are on a line under Send at ${width} px`);
+
+                await busy(true);
+                const working = await fit();
+
+                inside(width, "with three extension buttons", working);
+                assert.equal(working.shown, 3, "the extension's buttons stay, on their own line");
+                assert.ok(working.below, `the buttons are on a line under Stop at ${width} px`);
+
+                // A touch screen's taller tap layer on each mode still takes a tap above and below it: the cut that
+                // keeps Stop in is sideways only.
+                const taps = await inPage<{ above: boolean; below: boolean }[]>(`
+                    const touch = new CSSStyleSheet();
+
+                    touch.replaceSync(".mode-switch button { position: relative } .mode-switch button::before { content: ''; position: absolute; inset: -6px 0 }");
+                    document.adoptedStyleSheets = [...document.adoptedStyleSheets, touch];
+                    const hits = [...document.querySelectorAll(".composer .mode-switch button")].map((each) => {
+                        const box = each.getBoundingClientRect();
+                        const x = box.left + box.width / 2;
+
+                        return {
+                            above: document.elementFromPoint(x, box.top - 4) === each,
+                            below: document.elementFromPoint(x, box.bottom + 4) === each,
+                        };
+                    });
+
+                    document.adoptedStyleSheets = document.adoptedStyleSheets.filter((each) => each !== touch);
+
+                    return JSON.stringify(hits);
+                `);
+
+                assert.ok(
+                    taps.length === 3 && taps.every((each) => each.above && each.below),
+                    `the modes' tap layer is cut at ${width} px: ${JSON.stringify(taps)}`,
+                );
+
+                // Text that the browser's own font-size setting makes bigger (Firefox on a phone does): the labels of the
+                // three modes grow, and Stop still stays in.
+                await page.evaluate(`
+                    const sheet = new CSSStyleSheet();
+                    sheet.replaceSync(".composer .mode-switch button { font-size: 18px !important; }");
+                    window.__bigText = sheet;
+                    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+                `);
+                inside(width, "with the mode labels at 18 px", await fit());
+                await page.evaluate(
+                    `document.adoptedStyleSheets = document.adoptedStyleSheets.filter((each) => each !== window.__bigText)`,
+                );
+
+                // Something that nothing planned for: the row still keeps Stop.
+                await page.evaluate(`
+                    const spacer = document.createElement("span");
+                    spacer.id = "stress";
+                    spacer.style.cssText = "flex: none; width: 140px; height: 10px";
+                    document.querySelector(".composer-row > .grow").before(spacer);
+                `);
+                inside(width, "with 140 px more in the row", await fit());
+                await page.evaluate(`document.getElementById("stress")?.remove()`);
+                await busy(false);
+                assert.equal((await fit()).shown, 3, "and the buttons are back when Pi stops");
+            }
+        } finally {
+            await busy(false);
+            await page.setViewport(DESKTOP);
+        }
+    },
+);
+
+test(
+    "many rail buttons: the rail scrolls as a whole, and fades the edge where more is",
+    real,
+    async () => {
+        const measure = () =>
+            inPage<{
+                more: string | null;
+                scroll: number;
+                client: number;
+                groupScrolls: boolean;
+                lastIn: boolean;
+            }>(`
+                const rail = document.querySelector(".sidebar .rail");
+                const group = rail.querySelector(".rail-exts");
+                const last = [...rail.querySelectorAll(".rail-ext")].at(-1).getBoundingClientRect();
+                const box = rail.getBoundingClientRect();
+
+                return JSON.stringify({
+                    more: rail.dataset.more ?? null,
+                    scroll: rail.scrollHeight,
+                    client: rail.clientHeight,
+                    groupScrolls: group.scrollHeight > group.clientHeight,
+                    lastIn: last.top >= box.top && last.bottom <= box.bottom,
+                });
+            `);
+        const frames = () =>
+            page.evaluate(`
+                for (let frame = 0; frame < 3; frame++) {
+                    await new Promise((resolve) => requestAnimationFrame(resolve));
+                }
+            `);
+
+        try {
+            await page.setViewport({ ...DESKTOP, height: 560 });
+            await page.navigate(`${base}/s/${session}`);
+            await until(() => has(rail("Meter")), "the meter's rail button");
+            await withMeter(`
+                globalThis.manyRail = [];
+
+                for (let at = 0; at < 8; at++) {
+                    globalThis.manyRail.push(
+                        pocket.rail({ id: "many-" + at, title: "Many " + at, icon: "grid", run: () => {} }),
+                    );
+                }
+
+                return "null";
+            `);
+            await until(() => has(rail("Many 7")), "the eight buttons");
+            await frames();
+            const top = await measure();
+
+            // One scroller: the extensions' group shows all its buttons, and the rail says that more is below.
+            assert.equal(
+                top.groupScrolls,
+                false,
+                "the extensions' buttons do not scroll on their own",
+            );
+            assert.ok(
+                top.scroll > top.client,
+                `the rail is taller than the window: ${JSON.stringify(top)}`,
+            );
+            assert.equal(top.more, "down");
+            assert.equal(top.lastIn, false);
+
+            await page.evaluate(`document.querySelector(".sidebar .rail").scrollTop = 1e6`);
+            await frames();
+            const end = await measure();
+
+            assert.equal(end.more, "up");
+            assert.equal(end.lastIn, true, "the last button scrolls into view");
+
+            // Room for all: no fade.
+            await page.setViewport({ ...DESKTOP, height: 1400 });
+            await frames();
+            await until(
+                async () => (await measure()).more === null,
+                "no fade once everything shows",
+            );
+        } finally {
+            await withMeter(`
+                for (let at = 0; at < 8; at++) {
+                    globalThis.manyRail?.[at]?.remove();
+                }
+
+                return "null";
+            `);
+            await page.setViewport(DESKTOP);
+        }
+    },
+);
+
 test("turning the module off takes away its button and closes its page", real, async () => {
     await page.navigate(`${base}/s/${session}`);
     await until(() => has(rail("Meter")), "the meter's rail button");

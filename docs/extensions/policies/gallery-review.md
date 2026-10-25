@@ -72,8 +72,15 @@ The maintainer checks that the code does only what the description says, and the
   _Reason:_ a drop-in can send anything anywhere, and only the description tells the owner.
 - **G13. Reads or writes outside the module's own data that the description does not tell.** The module's own data is its files in the drop-in folder, a folder of its own under the data folder, and its `x.<module>.*` documents. Outside are `config.json`, Pi's sign-ins, other modules' data, other sessions, the person's files outside the session's folder, and environment variables with secrets.\
   _Reason:_ these reads are where a module can take the owner's secrets.
-- **G14. Code fetched at run time.** This includes an import from an address, text that is downloaded and run, `npm install` or `npx` at run time, a binary that is downloaded and run, a browser module that tries to load scripts from elsewhere, and a module that updates itself. To run a program that is already on the machine (such as `git` or `gh`) is permitted when the description says so.\
-  _Reason:_ the reviewed commit must be all of the code that runs.
+- **G14. Code fetched at run time that the reviewed commit does not pin.** This includes an import from an address, text that is downloaded and run, `npm install` or `npx` of packages that no lock file pins, a binary that is downloaded and run, a browser module that tries to load scripts from elsewhere, and a module that updates itself. To run a program that is already on the machine (such as `git` or `gh`) is permitted when the description says so.\
+  _Reason:_ the reviewed commit must decide all of the code that runs.
+    - **G14.1. Pinned installs are permitted.** A module can install what it needs (packages, a runtime, or a model) when all of these are true:
+        - Each package is pinned by version and hash, in a lock file that is one of the entry's files, and the installer enforces the hashes (such as `pip install --require-hashes -r requirements.lock`, or `npm ci`). A model or another download is pinned to a revision or a hash that cannot change.
+        - The description names what it installs, from which hosts, and about how much disk it takes.
+        - It installs only after an action of the owner, or after a setting that starts off. It never installs while it loads.
+        - It installs into its own data (G13).
+
+        _Reason:_ the hashes in the reviewed commit then decide what runs, and the owner decides when.
 - **G15. A misleading entry.** This includes a description that does not tell what the code does; a hook or wrap that the description does not explain; a name or title that copies a built-in or another entry, or says it is official; `readOnlyHint` on a tool that changes something; and a tool description that tells Pi to do more than the tool's work ("always call this tool first").\
   _Reason:_ the owner decides by what the entry says.
 - **G16. Copied work without its license.** Code from another project keeps its license and its credit. A fork of another entry credits it and has a name of its own. The source repository has an OSI-approved license, in a `LICENSE` file at the pinned commit.\

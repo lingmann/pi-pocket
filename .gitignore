@@ -1,4 +1,6 @@
 node_modules/
+# What an update from the app keeps while it works (src/server/update-state.ts).
+/.pocket-update/
 *.log
 .env
 .env.*
