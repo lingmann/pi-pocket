@@ -29,6 +29,7 @@ import {
     type SubmissionId,
 } from "@earendil-works/pi-durable";
 import type { SubmitRequest } from "../src/server/commands.ts";
+import { BACKGROUND_PREFIX } from "../src/server/background.ts";
 import { InputSourceDoc, SubagentsDoc } from "../src/server/docs.ts";
 import createVictorReplyStyle from "../src/server/extensions/victor-reply-style.ts";
 import type { ExtensionWeb, PocketHost } from "../src/server/host.ts";
@@ -296,6 +297,52 @@ test("a typed follow-up waits while voice survives a tool round; a withdrawn voi
     assertVoice(seen[1]!);
     assert.equal(seen[1]!.role, "toolResult");
     assertText(seen[2]!);
+});
+
+test("an untagged background completion resets style only after the Victor run finishes", async (t) => {
+    const gate = Promise.withResolvers<void>();
+    const seen: Seen[] = [];
+    const { app, id } = await fixture(t, async (request) => {
+        seen.push(observe(request));
+
+        if (seen.length === 1) {
+            await gate.promise;
+
+            return fauxAssistantMessage([fauxToolCall("read", { path: "missing-test-file" })], {
+                stopReason: "toolUse",
+            });
+        }
+
+        return answer();
+    });
+
+    t.after(() => gate.resolve());
+    const voice = await submit(app, id, { source: "victor" });
+
+    await until(() => seen.length === 1, "voice request");
+    // BackgroundTasks submits directly to Durable, without a Victor source record or Commands.submit.
+    const report = await (
+        await app.conversation(id)
+    ).submit(
+        {
+            type: "input",
+            content: `${BACKGROUND_PREFIX}Task test exited with code 0.`,
+            whenBusy: "followUp",
+            requestId: "background:test-completion",
+        },
+        context,
+    );
+
+    assert.equal(await victorReplyMode(app, id, context), "victor");
+    gate.resolve();
+    await wait(app, voice.submissionId);
+    await wait(app, report.id);
+    assert.equal(seen.length, 3);
+    assertVoice(seen[0]!);
+    assertVoice(seen[1]!);
+    assert.equal(seen[1]!.role, "toolResult");
+    assertText(seen[2]!);
+    assert.ok(seen[2]!.text.startsWith(BACKGROUND_PREFIX));
 });
 
 for (const initial of ["victor", undefined] as const) {

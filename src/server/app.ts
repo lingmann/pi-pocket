@@ -109,6 +109,7 @@ import { type ExtensionInfo, ExtensionLoader, linkTypes, prepareDropInFolder } f
 import { ResendTask } from "./resend.ts";
 import { type Client, reportingOf, Room, ROOM_DOCS, subagentView } from "./room.ts";
 import { Schedules } from "./schedules.ts";
+import { BackgroundTasks } from "./background.ts";
 import { Shares } from "./share.ts";
 import { CommandEnvs, HiddenValues, wrapEnv } from "./hidden.ts";
 import { AppEventBus } from "./app-events.ts";
@@ -298,6 +299,8 @@ export class PocketApp {
     /** Model requests that hit a limit wait for it to clear, then go on (`limit-gate.ts`). */
     readonly limits: LimitGate;
     readonly schedules = new Schedules(this);
+    /** Commands Pi runs in the background, watched until they end (`background.ts`). */
+    readonly background = new BackgroundTasks(this);
     readonly goals = new Goals(this);
     readonly shell = new Shell(this);
     readonly spend = new Spend(this);
@@ -757,6 +760,7 @@ export class PocketApp {
             onLimitsChanged: (listener) => this.spend.onLimitsChanged(listener),
             linkedSessions: this.linkedSessions,
             schedules: this.schedules,
+            background: this.background,
             goals: this.goals,
             browsers: this.browsers,
             pip: this.pip,
@@ -2789,7 +2793,7 @@ export class PocketApp {
         return {
             available: status.available,
             enabled: false,
-            detail: "Lancet Guard is off in Pi Pocket: bash, write, and edit calls run unchecked here.",
+            detail: "Lancet Guard is off in Pi Pocket: bash, background, write, and edit calls run unchecked here.",
         };
     }
 
@@ -3359,6 +3363,7 @@ export class PocketApp {
             this.themes.close();
             this.spend.close();
             this.limits.close();
+            this.background.close();
             this.#unsubscribeCommits?.();
             this.#unsubscribeApprovals?.();
             this.#unsubscribeBrowsers?.();

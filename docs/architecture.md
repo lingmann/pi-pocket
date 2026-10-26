@@ -28,7 +28,7 @@ Some state lives in this process alone, and a restart forgets it. For example:
 
 **Its parts:**
 
-- `commands`, `extensionCommands`, `collab`, `alerts`, `providers`, `schedules`, `goals`, `shell`, `spend`
+- `commands`, `extensionCommands`, `collab`, `alerts`, `providers`, `schedules`, `background`, `goals`, `shell`, `spend`
 - `workspace`, `transcripts`, `attribution`, `piSessions`, `pip`, `watches`, `hooks`, `memory`, `gallery`, `updates`
 - `browsers`, `linkedSessions`
 

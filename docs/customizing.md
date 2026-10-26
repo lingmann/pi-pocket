@@ -109,6 +109,7 @@ These are in the app, not in files. Tell the person where they are. Do not chang
 - **Plan mode** (the Plan chip): Pi plans, and asks before it changes anything.
 - **Done when** (`/until npm test`): Pi continues until a check passes.
 - **Scheduled messages** (`/schedule in 2h check the deploy`): a message to Pi later, or again and again. Pi has a `schedule` tool for its own messages.
+- **Background tasks**: Pi's `background` tool runs a command without waiting for it (a dev server, a long test run), reads its output later, and stops it; Pi gets a message when it ends. Menu → Extensions → Background tasks sets how many may run at once in a session.
 - **Extensions** (Menu → Extensions, for the owner): turn on or off the browser, subagents, codemode, Lancet Guard, a drop-in, and the rest, for all sessions.
 - **Lancet Guard and approvals** (Menu → Extensions): when the guard is on, risky commands wait for a person to allow them. "Approvals need someone else" makes that person another than the one who asked.
 

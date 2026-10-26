@@ -276,6 +276,11 @@ export function blockedInPlanMode(
         return undefined;
     }
 
+    // Nor does reading what a background task printed, or stopping it; starting one runs a command.
+    if (tool === "background" && args.action !== "start") {
+        return undefined;
+    }
+
     // A data: page is a page Pi writes, scripts and all: looking at pages means pages that exist.
     const scripted =
         tool === "browser" &&

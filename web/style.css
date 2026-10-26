@@ -9426,6 +9426,34 @@ textarea.notes {
     }
 }
 
+/* Phones: a sheet from the bottom edge, as the app's other sheets are, with a grip to drag it back down. Its height
+   stays put as results come and go, so its top edge does not jump while typing. */
+@media (max-width: 699px) {
+    .launcher-overlay {
+        align-items: flex-end;
+        padding: calc(env(safe-area-inset-top) + 24px) env(safe-area-inset-right) 0
+            env(safe-area-inset-left);
+    }
+    .launcher {
+        position: relative;
+        width: 100%;
+        height: 86dvh;
+        max-height: none;
+        padding-bottom: env(safe-area-inset-bottom);
+        border-radius: calc(var(--r-sheet) + 8px) calc(var(--r-sheet) + 8px) 0 0;
+        box-shadow:
+            0 -1px 0 var(--hair-2),
+            0 -20px 40px -20px var(--sh);
+        animation: sheet-up var(--t-in) var(--ease-out);
+    }
+    .leaving .launcher {
+        animation: sheet-down var(--t-out) var(--ease-in-out) forwards;
+    }
+    .launcher-input {
+        padding-top: 20px;
+    }
+}
+
 /* ─── Appearance ───────────────────────────────────────────── */
 
 .theme-grid {
@@ -17094,6 +17122,16 @@ pre.gallery-code {
 
 :root[data-motion="fluid"] .leaving .launcher {
     animation: fluid-float-out 140ms var(--ease-exit) forwards;
+}
+
+/* Phones: the launcher is a sheet from the bottom edge, so it glides up as sheets do. */
+@media (max-width: 699px) {
+    :root[data-motion="fluid"] .launcher {
+        animation: sheet-up var(--t-glide) var(--ease-glide);
+    }
+    :root[data-motion="fluid"] .leaving .launcher {
+        animation: sheet-down 140ms var(--ease-exit) forwards;
+    }
 }
 
 /* Menus up from a control (the model, the branch): from the control's side. */

@@ -91,3 +91,19 @@ Observed in the merged Victor checkout on macOS, Node 24.22.1, and Chromium. The
 `artifact-bridge-ui.test.ts`'s **a viewer gets a notice, not a message** timed out waiting for “the notice” after tapping the artifact iframe. The test expects a viewer-only refusal containing “you can only view here”. The test, `web/artifact-bridge.js`, and `src/server/http/artifacts.ts` are unchanged by this merge. An isolated rerun of this test passed without a change; its cause remains unknown, and that pass establishes neither a fix nor an upstream baseline failure.
 
 The full run passed 1065 tests, failed 12, and skipped 2 process-lock checks. All Victor tests and extension-loader tests passed. The other 11 failures matched the recorded macOS path, composer-key, launcher-focus/shortcut, and file-manager signatures. The full suite began before the final check-only updater timer fix; the final `victor-updates.test.ts`, `updates.test.ts`, and `updates-routes.test.ts` group passed all 38 tests. The full suite was not repeated after that focused fix. No unrelated fixes or upstream comparison were performed.
+
+## v0.24.0: artifact follow-up and preview timeouts
+
+Observed in the merged Victor checkout on macOS, Node 24.22.1, and Chromium. The full suite used `--test-concurrency=2` and excluded `VENICE_API_KEY`, `MISTRAL_API_KEY`, `MEGAARK_API_KEY`, and `CLOUDFLARE_API_KEY`. The original release has not been tested separately.
+
+| Test                         | Failure signature                                                                                    |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `artifact-bridge-ui.test.ts` | **A tap's follow-up joins the draft** times out waiting for “the follow-up in the box”.              |
+| `artifact-inline-ui.test.ts` | **A running card gets the artifact bridge** times out waiting for “the follow-up”.                   |
+| `artifact-inline-ui.test.ts` | **An update adds a card; the earlier card keeps its version** times out waiting for “both previews”. |
+
+The complete artifact bridge and inline suites then passed separately without a code change: 10 and 11 tests respectively. These passing reruns establish neither a fix nor a cause. Both test files, `web/artifact-bridge.js`, `web/rich.js`, and `src/server/http/artifacts.ts` are unchanged by this merge and match the incoming release. No pristine-upstream comparison or unrelated fix was performed.
+
+The full run passed 1119 tests, failed 14, and skipped 32. All Victor tests passed, including the new queued background-completion style regression. The other 11 failures matched recorded macOS path, composer-key, launcher-focus/shortcut, and file-manager signatures. Linux background-process cases and 2 process-lock checks were skipped on this host. A separate final reply-style run passed all 22 tests.
+
+A filtered client browser group (`clock-ui.test.ts`, `launcher-ui.test.ts`, and `victor-composer-ui.test.ts`) emitted 11 passes, then reached its 180-second command timeout without a final summary. No matching child or browser remained afterward; its cause is unverified. The full suite subsequently completed with no Victor or clock failures.
