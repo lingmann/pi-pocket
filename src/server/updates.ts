@@ -12,7 +12,7 @@
 import { execFile } from "node:child_process";
 import { constants, existsSync, lstatSync, readFileSync } from "node:fs";
 import { access, mkdir, realpath, rm, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { describe, HttpError } from "./errors.ts";
 import { git, GitError } from "./git.ts";
 import {
@@ -585,7 +585,9 @@ export class Updates {
 
             if (!local.git) {
                 blockers.push(
-                    "This copy of Pi Pocket is not a git checkout. Update it the way you installed it.",
+                    this.#root.split(sep).includes("node_modules")
+                        ? `This copy of Pi Pocket came from npm. When ${latest.tag} is on npm, update it with \`npm install -g pi-pocket@latest\` (or run \`npx pi-pocket@latest\`), then start it again.`
+                        : "This copy of Pi Pocket is not a git checkout. Update it the way you installed it.",
                 );
             } else if (gitVersion !== undefined && !atLeast(gitVersion, MIN_GIT)) {
                 blockers.push(

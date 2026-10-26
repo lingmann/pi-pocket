@@ -9,7 +9,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import {
@@ -50,6 +50,13 @@ import {
 const SERVER = fileURLToPath(new URL("../server/main.ts", import.meta.url));
 /** Pi Pocket's checkout, which an update from the app changes (`src/server/updates.ts`). */
 const APP_ROOT = fileURLToPath(new URL("../..", import.meta.url));
+/**
+ * From an npm install (a node_modules folder), Node strips no types: the server then starts with the hook that does
+ * (`bin/strip-types.js`). A checkout starts without it.
+ */
+const SERVER_FLAGS = APP_ROOT.split(sep).includes("node_modules")
+    ? ["--import", new URL("../../bin/strip-types.js", import.meta.url).href]
+    : [];
 const RESTART_CODE = 75;
 /** How long a server started with an update under way may take to be ready before it counts as not starting. */
 const UPDATE_START_LIMIT_MS = 5 * 60_000;
@@ -461,7 +468,8 @@ function startServer(first: boolean): void {
     }
 
     // Node 22 calls node:sqlite experimental and says so at every start, right above the panel.
-    const proc = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", ...args], {
+    const flags = ["--disable-warning=ExperimentalWarning", ...SERVER_FLAGS];
+    const proc = spawn(process.execPath, [...flags, ...args], {
         stdio: ["ignore", "pipe", "pipe", "ipc"],
         // PI_POCKET_ROLLBACK: this launcher goes back to the version before an update that does not start.
         env: {

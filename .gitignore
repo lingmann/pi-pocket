@@ -14,3 +14,6 @@ result-*
 
 # Folders docker-compose.yml mounts from the host; user data, never tracked.
 /data/
+
+# What `npm pack` makes.
+/*.tgz

@@ -6,7 +6,7 @@
  * Edit freely: saving this file reloads it into the running server.
  */
 import { statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import {
     formatSkillsForPrompt,
     getDocsPath,
@@ -37,7 +37,7 @@ function docs(dataDir: string): string {
 
     return `Pi Pocket documentation (read only when someone asks about Pi Pocket itself: how it works, changing how you behave in it, extending it, or changing its code):
 - Start here: ${join(folder, "index.md")}
-- Pi Pocket's code is in ${code}; its data (people, settings, sessions) in ${dataDir}. Change the data through the app, never by editing its files, except extensions/ in it, where drop-in extensions go, and themes/, where the owner's themes are.
+- Pi Pocket's code is in ${code}${code.split(sep).includes("node_modules") ? " (an npm install: read it, never edit it, since the next npm update replaces it; to change Pi Pocket, clone https://github.com/TannerMidd/pi-pocket and run that)" : ""}; its data (people, settings, sessions) in ${dataDir}. Change the data through the app, never by editing its files, except extensions/ in it, where drop-in extensions go, and themes/, where the owner's themes are.
 - When asked about: changing how you behave without code, such as instructions, AGENTS.md, skills, or prompt templates (docs/customizing.md); a new tool, prompt section, or hook, or a page, button, or route in the app (docs/extensions.md, an index of the guides in docs/extensions/, with working examples in docs/examples/ and the exact types in types/pocket.d.ts); how the app looks or is laid out: a theme (docs/extensions/themes.md, with every token and part in docs/extensions/reference/theme-surface.md); changing Pi Pocket's own code while it runs (docs/self-editing.md); where its code is (docs/map.md); how its parts depend on each other (docs/architecture.md); what a feature does (docs/features.md)
 - Resolve docs/... and types/... under ${code}, not the working directory. Read a doc completely before changing anything. docs/index.md and docs/extensions.md are indexes: follow the links your task needs, not all of them.
 - Pi's own documentation (skills, prompt templates, models, providers, settings): ${getDocsPath()}`;

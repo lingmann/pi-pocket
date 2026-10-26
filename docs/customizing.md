@@ -63,6 +63,20 @@ Models are the person's choice, never Pi's:
 
 Instructions, skills, and `AGENTS.md` cannot change this. Tell the person where the setting is instead.
 
+### When a model's context is compacted
+
+Pi Pocket compacts a session's context with Pi's settings in `~/.pi/agent/settings.json`: `compaction.reserveTokens` (the room kept free: Pi waits for a compaction above the model's context window minus it, and one starts in the background about 32,000 tokens before that) and `compaction.keepRecentTokens`. Since 0.25.0, `compaction.modelOverrides` gives one model its own values, keyed by `provider/modelId`, for example to compact a model with a large window much earlier:
+
+```json
+{
+    "compaction": {
+        "modelOverrides": { "openai-codex/gpt-6.1-sol": { "reserveTokens": 350000 } }
+    }
+}
+```
+
+Other models keep the general values. An entry that Pi refuses (not a whole number, or a name with no provider) is left out, and the server log says so. PiP uses its model's values too. An edit of `settings.json` counts once Pi Pocket reads Pi's settings again: soon after the next message, or at once with Menu → **Refresh models**. See Pi's `settings.md` for each setting.
+
 ## Project model defaults for new sessions
 
 Menu → **Default model** sets the owner's model and thinking level for the whole app. This always wins. To use project defaults, open that menu and choose **Clear owner default: use project defaults, then last picked**.

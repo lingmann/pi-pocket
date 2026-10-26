@@ -25,7 +25,7 @@ import {
     watch,
     writeFileSync,
 } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Extension, Registry } from "@earendil-works/pi-durable";
 import { describe } from "./errors.ts";
@@ -198,16 +198,36 @@ function moduleFiles(directory: string): string[] {
 /**
  * Make the drop-in folder, with a `node_modules` link to Pi Pocket's own packages. Drop-ins then import
  * `@earendil-works/pi-durable` and the rest as built-in modules do, and get the very modules the server runs. A
- * `node_modules` folder the owner made there stays as it is; a link to another place is replaced.
+ * `node_modules` folder the owner made there stays as it is; a link to another place is replaced. Where npm split Pi
+ * Pocket's packages between folders (a local install beside other versions of them), `packageModules` says where each
+ * is, and the link leads to a hidden folder with a link to each one instead.
  */
-export function prepareDropInFolder(directory: string, appModules: string): void {
+export function prepareDropInFolder(
+    directory: string,
+    appModules: string,
+    packageModules: Readonly<Record<string, string>> = {},
+): void {
     mkdirSync(directory, { recursive: true });
     // A junction on Windows: no administrator rights needed.
-    keepLink(
-        join(directory, "node_modules"),
-        appModules,
-        process.platform === "win32" ? "junction" : "dir",
-    );
+    const type = process.platform === "win32" ? "junction" : "dir";
+    let target = appModules;
+
+    // All in one folder, as in a checkout and most installs: one link to it, as before.
+    if (Object.values(packageModules).some((modules) => modules !== appModules)) {
+        target = join(directory, ".pocket-packages");
+        mkdirSync(target, { recursive: true });
+
+        for (const [name, modules] of Object.entries(packageModules)) {
+            const link = join(target, name);
+
+            if (existsSync(join(modules, name))) {
+                mkdirSync(dirname(link), { recursive: true });
+                keepLink(link, join(modules, name), type);
+            }
+        }
+    }
+
+    keepLink(join(directory, "node_modules"), target, type);
 }
 
 /** The first line of a copy of the types that Pi Pocket made where it cannot link: it refreshes only such a copy. */

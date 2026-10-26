@@ -511,6 +511,15 @@ function SessionRow({
                         <${Icon} name="fork" size=${10} />${live > 0 ? live : failed}
                     </span>`
                 }
+                ${
+                    session.background > 0 &&
+                    html`<span
+                        class="session-background"
+                        title=${`${session.background} ${session.background === 1 ? "command runs" : "commands run"} in the background`}
+                    >
+                        <${Icon} name="terminal" size=${10} />${session.background}
+                    </span>`
+                }
                 ${!fork && person && html`<${Avatar} person=${person} size=${18} />`}
                 ${
                     session.busy &&
@@ -1599,7 +1608,7 @@ function RailTiles() {
                 class=${`ws ${session.id === conversationId ? "active" : ""} ${session.busy ? "busy" : ""} ${session.waiting ? "waiting" : ""}`}
                 style=${`--i:${index}`}
                 title=${`${session.title ?? "New session"}${index < 9 ? ` (Alt+${index + 1})` : ""}`}
-                aria-label=${`${session.title ?? "New session"}${session.waiting ? ", needs you" : session.busy ? ", working" : ""}`}
+                aria-label=${`${session.title ?? "New session"}${session.waiting ? ", needs you" : session.busy ? ", working" : session.background > 0 ? ", running commands in the background" : ""}`}
                 aria-current=${session.id === conversationId ? "page" : undefined}
                 onClick=${() => navigate(session.id)}
             >
@@ -1625,7 +1634,8 @@ function Rail({ foldable = false, folded = false }) {
     // Counted again only when the session list changes, not on each draw of the rail.
     const { busy, agents } = useMemo(
         () => ({
-            busy: sessions.filter((session) => session.busy).length,
+            // Commands Pi runs in the background are at work too, after its answer ended.
+            busy: sessions.filter((session) => session.busy || session.background > 0).length,
             agents: subagentTotals(sessions),
         }),
         [sessions],
