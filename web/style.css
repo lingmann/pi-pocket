@@ -799,6 +799,7 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
     :root:not([data-motion="full"], [data-motion="fluid"]) .pulse,
     :root:not([data-motion="full"], [data-motion="fluid"]) .live-dot,
+    :root:not([data-motion="full"], [data-motion="fluid"]) .background-now .dot,
     :root:not([data-motion="full"], [data-motion="fluid"]) .agents-dot.working,
     :root:not([data-motion="full"], [data-motion="fluid"]) .session-working,
     :root:not([data-motion="full"], [data-motion="fluid"]) .session-placeholder span {
@@ -2570,6 +2571,22 @@ pre.diff .del {
     color: var(--muted);
 }
 
+/* A background task's end: its command can be one long word, and its output keeps its lines as printed. */
+.background-command {
+    overflow-wrap: anywhere;
+}
+
+.background-output pre {
+    margin: 6px 0 0;
+    padding: 8px 10px;
+    overflow-x: auto;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card);
+    background: var(--code-bg);
+    font: calc(var(--text-size, 15px) * 5 / 6) / 1.5 var(--mono);
+    white-space: pre;
+}
+
 .report-name {
     color: var(--text);
     font-weight: 600;
@@ -3836,6 +3853,27 @@ pre.diff .del {
     color: var(--warn);
 }
 
+/* Commands Pi runs in the background: a pill that opens Running now, with a dot that pulses while they run. */
+.status-line .background-now {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border-radius: var(--r-pill);
+    background: var(--accent-soft);
+    color: var(--accent);
+    font: inherit;
+}
+
+.status-line .background-now .dot {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: pulse 1.4s infinite;
+}
+
 /* How fast the last answer came, once Appearance turns it on: its two halves spaced like the line's items. */
 .status-line .speed {
     display: inline-flex;
@@ -3859,6 +3897,7 @@ pre.diff .del {
 .status-line[data-short~="words"] .speed .long,
 .status-line[data-short~="here"] .here.alone,
 .status-line[data-short~="guard"] .guard .word,
+.status-line[data-short~="guard"] .background-now .word,
 .status-line[data-short~="cache"] .cache,
 .status-line[data-short~="wait"] .speed .wait,
 .status-line[data-short~="wait"] .speed.wait-only {
@@ -5150,6 +5189,23 @@ pre.diff .del {
     background: var(--accent-soft);
     font-weight: 600;
     color: var(--accent);
+}
+
+/* Commands Pi runs in the background there: the same pill, quieter, since nothing waits on them. */
+.session-background {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: var(--r-pill);
+    background: var(--line);
+    color: var(--muted);
+    font-weight: 600;
+}
+
+.session-background .icon {
+    stroke-width: 2.4;
 }
 
 .session-fork.failed {
@@ -13666,10 +13722,12 @@ textarea.notes {
     }
     /* The guard and the review's branch keep their small pills; an invisible layer past each takes a thumb's tap. */
     .status-line .guard,
+    .status-line .background-now,
     .dr-branch {
         position: relative;
     }
     .status-line .guard::after,
+    .status-line .background-now::after,
     .dr-branch::after {
         content: "";
         position: absolute;

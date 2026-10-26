@@ -2018,6 +2018,44 @@ defineItem("status", {
         return `$${spent.toFixed(2)} spent${budget !== undefined ? ` of $${budget.toFixed(2)}` : ""}`;
     },
 });
+
+/** How many commands the open session runs in the background now (the server's session list counts them). */
+function backgroundNow() {
+    const { sessions, conversationId } = store.state;
+
+    return sessions.find((session) => session.id === conversationId)?.background ?? 0;
+}
+
+const backgroundTitle = (count) =>
+    `${count} ${count === 1 ? "command runs" : "commands run"} in the background: open Running now to see or stop ${count === 1 ? "it" : "them"}`;
+
+defineItem("status", {
+    id: "core:background",
+    label: "Background tasks",
+    order: 650,
+    render() {
+        const count = backgroundNow();
+
+        return (
+            count > 0 &&
+            html`<button
+                class="background-now"
+                aria-label=${backgroundTitle(count)}
+                title=${backgroundTitle(count)}
+                onClick=${() => openSheet({ type: "running" })}
+            >
+                <span class="dot" aria-hidden="true"></span>
+                <span class="num">${count}</span>
+                <span class="word">${" "}in background</span>
+            </button>`
+        );
+    },
+    detail() {
+        const count = backgroundNow();
+
+        return count > 0 && backgroundTitle(count);
+    },
+});
 defineItem("status", {
     id: "core:guard",
     label: "Lancet Guard",

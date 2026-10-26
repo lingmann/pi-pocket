@@ -652,6 +652,31 @@ test("Running now's Stop ends a background task, for those who may steer", { ski
     }
 });
 
+test(
+    "the session list counts the commands a session runs in the background",
+    { skip },
+    async () => {
+        const id = await session();
+        const listed = () => app.sessions().find((entry) => entry.id === Number(id))?.background;
+
+        assert.equal(listed(), undefined);
+
+        const first = await app.background.start(id, { command: "sleep 300", notify: false });
+
+        await app.background.start(id, { command: "sleep 300", notify: false });
+        // The status line and the rail show it after Pi's answer ends: the count comes from the task, not the run.
+        await until(() => listed() === 2, "2 listed");
+        await app.background.stop(id, first.id);
+        await until(() => listed() === 1, "1 listed");
+
+        for (const item of await items(id)) {
+            await app.background.stop(id, item.id);
+        }
+
+        await until(() => listed() === undefined, "none listed");
+    },
+);
+
 test("a value that repeats inside itself stays hidden across reads", { skip }, async () => {
     const id = await session();
     const remove = app.hidden.add({ value: "ABCDABCD", label: "twice" });

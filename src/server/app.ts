@@ -51,12 +51,14 @@ import type { BrowserState } from "./browser/page.ts";
 import { Collab, REACTIONS } from "./collab.ts";
 import { Commands } from "./commands.ts";
 import { LinkedSessions } from "./linked-sessions.ts";
-import { APP_ROOT, ConfigStore, type User } from "./config.ts";
+import { APP_ROOT, ConfigStore, modulesWith, type User } from "./config.ts";
 import {
     ArtifactBodyDoc,
     type ArtifactMeta,
     ArtifactsDoc,
     AuthorsDoc,
+    BackgroundDoc,
+    type BackgroundTask,
     BrowserDoc,
     ChatDoc,
     type ChatMessage,
@@ -89,7 +91,8 @@ import { takeLock } from "./lock.ts";
 import { Memory } from "./memory.ts";
 import { isThinkingLevel, modelInfo, modelList, resolveModel, THINKING_LEVELS } from "./models.ts";
 import { Updates } from "./updates.ts";
-import { pocketVersion } from "./versions.ts";
+import { pocketPackage, pocketVersion } from "./versions.ts";
+import { compactionReader } from "./compaction.ts";
 import { configureHttp } from "./net.ts";
 import { createPublicFetch } from "./public-fetch.ts";
 import { PiSessions } from "./pi-sessions.ts";
@@ -364,6 +367,8 @@ export class PocketApp {
      * server started: the session list marks them until their next run starts.
      */
     readonly #failed = new Set<ConversationId>();
+    /** How many commands each session runs in the background now (`background.ts`): the list and status line show it. */
+    readonly #background = new Map<ConversationId, number>();
     readonly #agents = new Map<ConversationId, AgentState>();
 
     /** The newest chat message (not activity) of each conversation, for unread dots in the session list. */
@@ -778,7 +783,16 @@ export class PocketApp {
         const dropIn = join(this.dataDir, "extensions");
 
         try {
-            prepareDropInFolder(dropIn, join(APP_ROOT, "node_modules"));
+            prepareDropInFolder(
+                dropIn,
+                modulesWith("@earendil-works/pi-durable"),
+                Object.fromEntries(
+                    Object.keys(pocketPackage.dependencies ?? {}).map((name) => [
+                        name,
+                        modulesWith(name),
+                    ]),
+                ),
+            );
         } catch (error) {
             this.#log(`Drop-in extensions cannot import Pi Pocket's packages: ${describe(error)}`);
         }
@@ -928,6 +942,7 @@ export class PocketApp {
                 }
 
                 this.#noteSubagents(id, await this.harness.snapshot(SubagentsDoc, id, context));
+                this.#noteBackground(id, await this.harness.snapshot(BackgroundDoc, id, context));
             }
 
             cursor = page.next;
@@ -1029,6 +1044,17 @@ export class PocketApp {
         const kind = change.record.kind;
         const id = change.conversationId;
         let sessionsChanged = false;
+
+        if (
+            kind === BackgroundDoc.definition.kind &&
+            id !== undefined &&
+            this.#noteBackground(
+                id,
+                change.value as { items: Record<string, BackgroundTask> } | null,
+            )
+        ) {
+            sessionsChanged = true;
+        }
 
         if (kind === "pi.live" && id !== undefined) {
             const busy = (change.value as LiveState | null)?.run !== undefined;
@@ -1189,6 +1215,7 @@ export class PocketApp {
 
         const registry = () => this.#registry;
         const stream = () => this.streamSettings();
+        const compaction = compactionReader(settings, (line) => this.#log(line));
 
         return {
             // A phase can wait for hours without changing state; repeated process kills must not park it.
@@ -1205,7 +1232,7 @@ export class PocketApp {
                 return stream();
             },
             get compaction() {
-                return safe(() => settings.getCompactionSettings()) ?? {};
+                return safe(compaction) ?? {};
             },
             get retry() {
                 return safe(() => settings.getRetrySettings()) ?? {};
@@ -1889,6 +1916,28 @@ export class PocketApp {
         return true;
     }
 
+    /** Count the commands a session runs in the background, starting ones too. True when the count changed. */
+    #noteBackground(
+        id: ConversationId,
+        doc: { items: Record<string, BackgroundTask> } | null | undefined,
+    ): boolean {
+        const running = Object.values(doc?.items ?? {}).filter(
+            (item) => item.status === "running" || item.status === "starting",
+        ).length;
+
+        if (running === (this.#background.get(id) ?? 0)) {
+            return false;
+        }
+
+        if (running === 0) {
+            this.#background.delete(id);
+        } else {
+            this.#background.set(id, running);
+        }
+
+        return true;
+    }
+
     #noteSubagents(id: ConversationId, doc: SubagentsValue | null | undefined): void {
         const agents = doc?.agents ?? {};
 
@@ -2247,6 +2296,7 @@ export class PocketApp {
                 const chat = this.#lastChat.get(id);
                 const endedAt = this.#endedAt.get(Number(id) as unknown as ConversationId);
                 const counts = countSubagents(subagents.get(id) ?? []);
+                const background = this.#background.get(Number(id) as unknown as ConversationId);
                 // Which of Pi's sessions it continues is the owner's to know (the Pi sessions sheet), not the list's.
                 const { fromPi: _fromPi, linkedFrom, ...shown } = meta;
                 // Linking does not share the origin: do not leak its id to someone who only sees the new chat.
@@ -2280,6 +2330,7 @@ export class PocketApp {
                     ...(here.length === 0 ? {} : { people: here }),
                     ...(chat === undefined ? {} : { chatAt: chat.at, chatBy: chat.userId }),
                     ...(counts === undefined ? {} : { subagents: counts }),
+                    ...(background === undefined ? {} : { background }),
                 };
             })
             .sort((a, b) => b.updatedAt - a.updatedAt);

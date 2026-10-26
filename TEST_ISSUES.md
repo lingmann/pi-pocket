@@ -107,3 +107,11 @@ The complete artifact bridge and inline suites then passed separately without a 
 The full run passed 1119 tests, failed 14, and skipped 32. All Victor tests passed, including the new queued background-completion style regression. The other 11 failures matched recorded macOS path, composer-key, launcher-focus/shortcut, and file-manager signatures. Linux background-process cases and 2 process-lock checks were skipped on this host. A separate final reply-style run passed all 22 tests.
 
 A filtered client browser group (`clock-ui.test.ts`, `launcher-ui.test.ts`, and `victor-composer-ui.test.ts`) emitted 11 passes, then reached its 180-second command timeout without a final summary. No matching child or browser remained afterward; its cause is unverified. The full suite subsequently completed with no Victor or clock failures.
+
+## v0.25.0: background-card tests require Linux
+
+Observed in the merged Victor checkout on macOS, Node 24.22.1, and Chromium. The full suite used `--test-concurrency=2` and excluded `VENICE_API_KEY`, `MISTRAL_API_KEY`, `MEGAARK_API_KEY`, and `CLOUDFLARE_API_KEY`. The original release has not been tested separately.
+
+Both tests in `background-ui.test.ts` time out waiting for “the background card”: **a background task's end shows as a card with its last lines** and **output whose own line says it is the end is not taken for a cut one**. Both failures repeated in a focused run. Their fixture starts real background commands but checks only for Chromium, unlike `background.test.ts`, which skips when `/proc/self/stat` is absent. A separate isolated-app assertion confirmed that starting the fixture's `seq 1000 1200` command rejects with “Background tasks need Linux”. The new browser tests and `src/server/background.ts` match the incoming release; this is evidence of a platform mismatch, not a pristine-upstream test result. No test or application fix was made.
+
+The full run passed 1133 tests, failed 15, and skipped 33. All Victor tests passed. The other 13 failures matched recorded macOS path, composer-key, launcher-focus/shortcut, file-manager, artifact-viewer notice, and rate-limit retry timeout signatures. The skipped cases were 31 Linux background-process checks and 2 process-lock checks. No unrelated fixes or pristine-upstream comparison were performed; Linux execution and physical-device audio remain untested.

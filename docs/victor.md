@@ -4,7 +4,7 @@ Victor is an experimental, English-only conversation mode that recognizes speech
 
 ## Setup
 
-**Installation support:** Run this fork from a checkout using the setup below. Nix, NixOS, and Docker/Podman packaging is retained from upstream but is not adapted or supported for this fork, including Victor's speech assets and fork-specific build checks. The upstream container image does not include Victor's preparation script, source pins, or prepared speech assets.
+**Installation support:** Run this fork from a checkout using the setup below. npm, Nix, NixOS, and Docker/Podman packaging is retained from upstream but is not adapted or supported for this fork, including Victor's speech assets and fork-specific build checks. The upstream npm package and container image do not include Victor's preparation script, source pins, or prepared speech assets.
 
 On the server, prepare the pinned speech assets:
 
@@ -87,7 +87,7 @@ Later activations reuse cached assets but still take time to initialize. Updates
 
 Merge upstream through [the fork workflow](fork-workflow.md), then deploy the reviewed fork manually. `PI_POCKET_UPDATES_REPO` can change the discovery source, but cannot enable installation. The upstream update and rollback code remains in place to keep future merges small; Victor does not initiate those updates.
 
-Upstream 0.24.0 adds no dependency change or database migration. Its background commands require Linux; their absence on macOS does not disable Victor. Background-task completions use ordinary reply style once their messages enter a run; a queued completion does not change an active Victor reply.
+Upstream 0.25.0 adds npm installation, background-task indicators and completion cards, independent subagent thinking levels, and per-model compaction settings. It changes no dependency versions or database format. Victor still requires a fork checkout. Background commands require Linux; their absence on macOS does not disable Victor. Background-task completions use ordinary reply style once their messages enter a run; a queued completion does not change an active Victor reply.
 
 When deploying across 0.23.0, stop and start the complete launcher to load that release's launcher changes; **Restart server** alone does not reload the launcher.
 
