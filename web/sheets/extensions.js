@@ -25,13 +25,13 @@ function guardNote(module, guard) {
     if (!module.enabled) {
         return {
             warn: true,
-            text: "Off in Pi Pocket: bash, write, and edit calls run unchecked here. Pi itself still uses it.",
+            text: "Off in Pi Pocket: bash, background, write, and edit calls run unchecked here. Pi itself still uses it.",
         };
     }
 
     return {
         warn: false,
-        text: "Checks bash, write, and edit calls. Risky ones wait for someone in the session to allow them.",
+        text: "Checks bash, background, write, and edit calls. Risky ones wait for someone in the session to allow them.",
     };
 }
 
@@ -614,7 +614,7 @@ export function ExtensionsContent({ galleryInstalled, query = "", onChanged = ()
                         }
                     }}
                 >
-                    <span id="guard-confirm-warning">bash, write, and edit calls will run without checks in every session here. Pi's own setting stays as it is.</span>
+                    <span id="guard-confirm-warning">bash, background, write, and edit calls will run without checks in every session here. Pi's own setting stays as it is.</span>
                     <div class="sheet-actions">
                         <button
                             class="button small"

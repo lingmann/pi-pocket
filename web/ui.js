@@ -1642,8 +1642,9 @@ export const WIDE = matchMedia("(min-width: 960px)");
 /** No pointer that hovers (a touch screen): what only hovering shows, such as a row's buttons, is not drawn. */
 export const NO_HOVER = matchMedia("(hover: none)");
 
-// Either changing (a window resized, a mouse plugged in) draws the app again, with or without them.
-for (const query of [WIDE, NO_HOVER]) {
+// Each changing (a window resized, a phone turned, a mouse plugged in) draws the app again, with or without them: a sheet
+// open as the phone turns gets its drag to close, or lets go of it.
+for (const query of [WIDE, NO_HOVER, BOTTOM_SHEETS]) {
     query.addEventListener("change", () => store.set({}));
 }
 

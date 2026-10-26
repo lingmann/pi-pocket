@@ -559,6 +559,26 @@ export async function conversationRoutes(
         return json(response, 200, { ok: true });
     }
 
+    // Running now's Stop for a command Pi runs in the background: anyone who may steer the session.
+    if (
+        third === "background" &&
+        fourth !== undefined &&
+        parts[4] === "stop" &&
+        method === "POST"
+    ) {
+        app.requireSee(user, id);
+        app.requireSteer(user);
+        const item = await app.background.byTask(id, fourth);
+
+        if (item === undefined) {
+            throw new HttpError(404, "No such background task here.");
+        }
+
+        await app.background.stop(id, item.id);
+
+        return json(response, 200, { ok: true });
+    }
+
     if (third === "history" && method === "GET") {
         return json(
             response,

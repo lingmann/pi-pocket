@@ -2025,7 +2025,7 @@ defineItem("status", {
     fixed: true,
     render() {
         const { guard } = store.state;
-        // On but not loaded: the guard blocks bash, write, and edit until it loads or is turned off.
+        // On but not loaded: the guard blocks bash, background, write, and edit until it loads or is turned off.
         const failed = guard?.enabled && guard.available === false;
 
         if (!guard?.enabled && !guard?.available) {

@@ -70,6 +70,7 @@ type Internal =
     | "approvals"
     | "guard"
     | "schedules"
+    | "background"
     | "goals"
     | "browsers"
     | "memory"

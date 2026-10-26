@@ -19,6 +19,7 @@ import type { Memory } from "./memory.ts";
 import type { Pip } from "./pip.ts";
 import type { PipCompaction } from "./pip-compact.ts";
 import type { Schedules } from "./schedules.ts";
+import type { BackgroundTasks } from "./background.ts";
 import type { Updates } from "./updates.ts";
 import type { RepoWatches } from "./repo-watches.ts";
 import type { Watches } from "./watches.ts";
@@ -437,7 +438,12 @@ export interface PocketHost {
      */
     readonly linkedSessions: LinkedSessionsApi;
     /** Messages to Pi for later: the schedule tool sets up Pi's own. */
-    readonly schedules: Pick<Schedules, "add" | "cancel" | "list" | "task">;
+    readonly schedules: Pick<Schedules, "add" | "cancel" | "limits" | "list" | "task">;
+    /** Commands Pi runs in the background: the background tool starts, reads, and stops them. */
+    readonly background: Pick<
+        BackgroundTasks,
+        "start" | "read" | "stop" | "list" | "limits" | "task" | "describe"
+    >;
     /** Sessions' goals: the goals extension runs their checks and counts them. */
     readonly goals: Pick<Goals, "get" | "run" | "record" | "mayContinue">;
     /** The built-in browser: a page per conversation, which the people in it watch and use too. */
