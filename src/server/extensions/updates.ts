@@ -1,6 +1,6 @@
 /**
  * Updates of Pi Pocket itself: it looks for a new release every 6 hours, tells the owner, shows its notes, and updates
- * the git checkout to it with one tap, then restarts; it can also install new releases by itself while no session is
+ * the git checkout or the global npm install to it with one tap, then restarts; it can also install new releases by itself while no session is
  * working. Its routes and screens are the owner's alone (`updates.ts` does the work).
  */
 import { defineExtension } from "@earendil-works/pi-durable";
@@ -51,7 +51,7 @@ export default function createUpdates(host: PocketHost, web: ExtensionWeb) {
             name: "check",
             label: "Look for new versions",
             description:
-                "Ask GitHub for the newest release every 6 hours, and say when there is one.",
+                "Ask npm (for an npm install) or GitHub for the newest release every 6 hours, and say when there is one.",
             type: "boolean",
             default: true,
         },

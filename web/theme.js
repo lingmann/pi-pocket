@@ -69,6 +69,12 @@ const DEFAULTS = {
     speed: false,
     /** Pi's current thought above the live line, and its finished thoughts open. Off until turned on. */
     showThinking: false,
+    /**
+     * Pi's thinking and tool calls stay folded into their one line until opened, also while they run and in the newest
+     * turn; off, the newest turn's groups open as they come. A group opened or closed by hand keeps that choice, and a
+     * thought alone in its group still follows Show thinking. Off until turned on.
+     */
+    foldActivity: false,
     /** This browser's own layout of each slot (`slots.js`): `{ [slot]: { order: [ids], hidden: { [id]: boolean } } }`. */
     layout: {},
 };

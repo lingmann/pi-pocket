@@ -84,3 +84,4 @@ Each member in the reference has its own Since line. These parts came together:
 | Public pages: `web.publicPage` and `web.links` (experimental)                                                                                                     | 0.22.0 |
 | People's values and the browser: `host.ask`, `hide`, `commandEnv`, `browser` (experimental)                                                                       | 0.22.0 |
 | Events, services, and settings: `host.on`, `web.provide`, `use`, `onService`, `settings`, `setting`, `onSettings`, `pocket.settings`, `onSettings` (experimental) | 0.22.0 |
+| Give PiP a message: `pocket.pip.ask` (experimental)                                                                                                               | 0.26.0 |

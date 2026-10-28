@@ -2,6 +2,7 @@
 // into one line that opens into a timeline), then Pi's reply, any approval, and the live line while Pi works.
 import { Component } from "preact";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
+import { activityOpen } from "./activity-fold.js";
 import { initials, personColor } from "./avatar.js";
 import { routeSliding } from "./back.js";
 import { browserAvailable, setBrowserOpen } from "./browser.js";
@@ -69,7 +70,7 @@ const NEXT_REPORT = /\n\n(?=\[subagent \S+ (?:answered|failed))/;
 
 /**
  * A background task's message to Pi (`background.ts`): its head line, its command, and the end of its output fenced.
- * Its time is short ("2m 4s"), which keeps a long line that is not one quick to turn down.
+ * Its time is short ("2m 04s"), which keeps a long line that is not one quick to turn down.
  */
 const BACKGROUND =
     /^\[background\] Task (\S+) (.+?) after ([^.\n]{1,20})\.\nCommand: (.*)\n([\s\S]*)$/;
@@ -1249,7 +1250,8 @@ function GroupTime({ id, start, end, live }) {
 /**
  * Pi's thinking and tool calls between two of its words, as one line: what they did, and how long they took. It opens
  * into a timeline, a line per call, each drawn again only when what it shows changes. Open while it is live or in the
- * newest turn, closed before, unless opened or closed by hand.
+ * newest turn, closed before, unless opened or closed by hand; Appearance's Keep activity folded starts every group
+ * closed.
  */
 function ActivityGroup({
     item,
@@ -1277,20 +1279,25 @@ function ActivityGroup({
         keep(wholeGroups, id, true);
     }
 
-    const chosen = openedGroups.get(id);
     const all = item.before.length === 0 ? item.steps : [...item.before, ...item.steps];
     // A thought alone is the group's own line, not a step under a line that says the same: it opens to its words,
     // which stay folded until asked for, as a thought on the timeline does.
     const lone = all.length === 1 && all[0].block.type === "thinking" ? all[0] : null;
     // Show thinking on: thoughts show their words once written.
     const reading = prefs().showThinking === true;
-    // A thought whose words have not come yet (`partial`, as a session opens) opens once they have.
-    const open =
-        !lone?.block.partial &&
-        (chosen ??
-            (lone
-                ? reading && !lone.streaming && Boolean(lone.block.text?.trim())
-                : live || newest));
+    const open = activityOpen({
+        chosen: openedGroups.get(id),
+        lone: lone && {
+            partial: lone.block.partial,
+            streaming: lone.streaming,
+            text: lone.block.text,
+        },
+        live,
+        newest,
+        reading,
+        // Appearance's Keep activity folded.
+        fold: prefs().foldActivity === true,
+    });
     // Calls that failed, said on the line too: folded, "edited 1" alone would read as done. A call someone denied did
     // not fail, nor a script stopped by a denial: its line says who denied it.
     const failed = all.filter((step) => {
@@ -2368,6 +2375,8 @@ function Items({ items, results, slots, approvals, busy, past = false, conversat
             conversationId,
             after,
             prefs().showThinking === true,
+            // Keep activity folded: a group drawn before the switch moved opens or folds with it.
+            prefs().foldActivity === true,
         ];
 
         // The calls before the rows shown count in the group's line: their results, for its time.

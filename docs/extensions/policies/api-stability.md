@@ -159,6 +159,8 @@ Since 0.19.0, these `pocket` members are experimental too: `panel`, `openPanel`,
 
 Since 0.22.0, these are experimental too: `web.publicPage` and `web.links`; `host.ask`, `hide`, `commandEnv`, and `browser`; `host.on`; `web.provide`, `use`, `onService`, `settings`, `setting`, and `onSettings`; `pocket.settings` and `onSettings`; and their types. So are the `browser` tool's `action` and target arguments, for hooks.
 
+Since 0.26.0, `pocket.pip` (`ask`) is experimental, with `PipApi` and `PipAskResult`.
+
 Since 0.20.0, the session list's extension points are experimental: `pocket.sessionChips`, `sessionAction`, `sessionFilter`, and `sessionSearch`, `WebRequest.sessions`, and their types. So is `pocket.composerKey`, with `ComposerKeySpec` and `ComposerBox`, and so are `pocket.onConversation`, `messages`, and `reveal`, with `MessagesOptions`, `MessagePage`, and `MessageInfo`. So are `host.registerModelProvider`, and `host.fetchPublic` with `PublicFetchInit`.
 
 ### Deprecated

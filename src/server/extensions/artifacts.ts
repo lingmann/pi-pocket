@@ -4,6 +4,7 @@
  * version. The index and the bodies are durable documents committed together with
  * the call, so a replayed call finds the version it already wrote instead of writing another.
  */
+import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { extname, resolve } from "node:path";
@@ -15,16 +16,22 @@ import {
     type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import {
+    ArtifactAssetDoc,
     ArtifactBodyDoc,
+    type ArtifactAsset,
     type ArtifactMeta,
     ArtifactsDoc,
     type ArtifactType,
     type ArtifactVersion,
 } from "../docs.ts";
 import type { PocketHost } from "../host.ts";
+import { assetName, assetType } from "../http/artifact-assets.ts";
 import { expandHome } from "../paths.ts";
 
-const MAX_BYTES = 2_000_000;
+export const MAX_BYTES = 2_000_000;
+export const MAX_ASSET_BYTES = 5_000_000;
+export const MAX_ASSETS_BYTES = 20_000_000;
+export const MAX_ASSETS = 200;
 
 export function slugify(value: string): string {
     return value
@@ -36,7 +43,7 @@ export function slugify(value: string): string {
 }
 
 /** Agent-local files, not browser file access: parent links are allowed, the final file must not be a link. */
-async function readArtifact(path: string): Promise<string> {
+async function readFileBytes(path: string, limit: number): Promise<Buffer> {
     const handle = await open(
         path,
         constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW,
@@ -49,12 +56,12 @@ async function readArtifact(path: string): Promise<string> {
             throw new Error("Artifact paths must name a regular file.");
         }
 
-        if (info.size > MAX_BYTES) {
-            throw new Error(`Artifacts are limited to ${MAX_BYTES} bytes.`);
+        if (info.size > limit) {
+            throw new Error(`Files are limited to ${limit} bytes.`);
         }
 
         // Read at most one byte beyond the limit, even when the file grows after stat.
-        const buffer = Buffer.alloc(MAX_BYTES + 1);
+        const buffer = Buffer.alloc(limit + 1);
         let size = 0;
 
         while (true) {
@@ -66,24 +73,29 @@ async function readArtifact(path: string): Promise<string> {
 
             size += bytesRead;
 
-            if (size > MAX_BYTES) {
-                throw new Error(`Artifacts are limited to ${MAX_BYTES} bytes.`);
+            if (size > limit) {
+                throw new Error(`Files are limited to ${limit} bytes.`);
             }
         }
 
-        const bytes = buffer.subarray(0, size);
-
-        try {
-            if (bytes.includes(0)) {
-                throw new Error("Binary data");
-            }
-
-            return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
-        } catch {
-            throw new Error("Artifact paths must contain UTF-8 text, not binary data.");
-        }
+        // Do not retain the full limit-sized backing allocation for each small bundle file.
+        return Buffer.from(buffer.subarray(0, size));
     } finally {
         await handle.close();
+    }
+}
+
+async function readArtifact(path: string): Promise<string> {
+    const bytes = await readFileBytes(path, MAX_BYTES);
+
+    try {
+        if (bytes.includes(0)) {
+            throw new Error("Binary data");
+        }
+
+        return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+    } catch {
+        throw new Error("Artifact paths must contain UTF-8 text, not binary data.");
     }
 }
 
@@ -144,6 +156,7 @@ const guide = (
   - {type:"pocket-follow-up", text, selection}: puts a message in the person's message box, for them to read and send; it is never sent by itself, and the viewer closes so the box shows. Send it from a button's click or tap: the app takes it only right after the person taps or presses a key on the page (focus alone does not count; a tap serves one follow-up), and once every 2 seconds. text is up to 2,000 characters; selection, optional, is JSON up to 2,000. The app answers {type:"pocket-follow-up", ok, error}. Use it for "Ask Pi about this" buttons.
   - {type:"pocket-state-get", requestId, schema} and {type:"pocket-state-set", requestId, state, schema}: load and save up to 16 KB of JSON for the person using the artifact, so its controls survive a reload and follow them to other devices. requestId is 1 to 64 letters, digits, and _ . : - (others get no answer). The app answers {type:"pocket-state", requestId, ok, state, at, error}; state is null when nothing is saved. A set with state null clears it. schema, optional, is a string such as "v1" (up to 64 letters, digits, and . _ : -; a number is refused): change it when the state's shape changes, and older state then reads as null. Save after changes settle (at most 20 saves in 10 seconds).
   - Only HTML artifacts have this (not Markdown or SVG). Neither works in a published link or a tab of its own: the page must still work when no answer comes.
+- Add images, fonts, data, stylesheets, scripts, and other HTML pages with assets: up to 200 entries of {name, path} (local file, binary allowed) or {name, content} (UTF-8 text). Names are relative paths made of letters, digits, dots, underscores, and hyphens, with no . or .. segment. One asset is at most 5 MB; one version keeps at most 20 MB. Relative URLs resolve inside the bundle. A new version keeps previous assets; replace them by name, or drop them with removeAssets. Use group (a lowercase kebab-case slug) for variations, and kind: "page" or "deck" for the design type.
 - Reuse the id to publish a new version. For small fixes, send edits against the latest version instead of the whole content.
 ${inline ? INLINE_GUIDE : ""}- To publish an existing local HTML, Markdown, or SVG file without repeating its contents, give path instead of content or edits. This copies a UTF-8 snapshot (up to 2,000,000 bytes), not a live link or its neighboring assets. Everyone who can see the conversation can open the snapshot.`;
 
@@ -156,6 +169,10 @@ type PublishArgs = {
     content?: string;
     path?: string;
     edits?: { oldText: string; newText: string }[];
+    assets?: { name: string; path?: string; content?: string }[];
+    removeAssets?: string[];
+    group?: string;
+    kind?: "page" | "deck";
 };
 
 /**
@@ -254,6 +271,78 @@ async function publish(
             throw new Error(`Artifacts are limited to ${MAX_BYTES} bytes.`);
         }
 
+        if (args.group !== undefined && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(args.group)) {
+            throw new Error("The group must be a lowercase kebab-case slug.");
+        }
+
+        if (args.group !== undefined && args.group.length > 64) {
+            throw new Error("The group is limited to 64 characters.");
+        }
+
+        if (
+            (args.assets?.length ?? 0) > MAX_ASSETS ||
+            (args.removeAssets?.length ?? 0) > MAX_ASSETS
+        ) {
+            throw new Error(`Give at most ${MAX_ASSETS} assets or removals.`);
+        }
+
+        for (const name of args.removeAssets ?? []) {
+            if (!assetName(name)) {
+                throw new Error(`Invalid asset name: ${name}`);
+            }
+        }
+
+        const prepared = new Map<string, { asset: ArtifactAsset; bytes: Buffer }>();
+        let preparedSize = 0;
+
+        for (const entry of args.assets ?? []) {
+            if (!assetName(entry.name) || prepared.has(entry.name)) {
+                throw new Error(`Invalid or repeated asset name: ${entry.name}`);
+            }
+
+            if ((entry.path === undefined) === (entry.content === undefined)) {
+                throw new Error(`Asset ${entry.name}: give exactly one of path or content.`);
+            }
+
+            let bytes: Buffer;
+
+            if (entry.path !== undefined) {
+                if (entry.path.trim() === "") {
+                    throw new Error("Give a local file path.");
+                }
+
+                const agent = await api.agent(context);
+                const path = resolve(agent.cwd ?? process.cwd(), expandHome(entry.path));
+
+                bytes = await readFileBytes(path, MAX_ASSET_BYTES);
+            } else {
+                if (Buffer.byteLength(entry.content!, "utf8") > MAX_ASSET_BYTES) {
+                    throw new Error(`Assets are limited to ${MAX_ASSET_BYTES} bytes each.`);
+                }
+
+                bytes = Buffer.from(entry.content!, "utf8");
+            }
+
+            if (bytes.length > MAX_ASSET_BYTES) {
+                throw new Error(`Assets are limited to ${MAX_ASSET_BYTES} bytes each.`);
+            }
+
+            preparedSize += bytes.length;
+
+            if (preparedSize > MAX_ASSETS_BYTES) {
+                throw new Error(`Bundle assets are limited to ${MAX_ASSETS_BYTES} bytes.`);
+            }
+
+            prepared.set(entry.name, {
+                asset: {
+                    hash: createHash("sha256").update(bytes).digest("hex"),
+                    size: bytes.length,
+                    type: assetType(entry.name),
+                },
+                bytes,
+            });
+        }
+
         version = await api.commit(async (tx) => {
             const doc = await tx.doc(ArtifactsDoc, api.conversationId);
             const current = Object.hasOwn(doc.items, id) ? doc.items[id] : undefined;
@@ -286,6 +375,38 @@ async function publish(
                 );
             }
 
+            const assets: Record<string, ArtifactAsset> = Object.fromEntries(
+                Object.entries(current?.versions.at(-1)?.assets ?? {}),
+            );
+
+            for (const name of args.removeAssets ?? []) {
+                delete assets[name];
+            }
+
+            for (const [name, value] of prepared) {
+                Object.defineProperty(assets, name, {
+                    value: value.asset,
+                    enumerable: true,
+                    writable: true,
+                    configurable: true,
+                });
+            }
+
+            if (Object.keys(assets).length > MAX_ASSETS) {
+                throw new Error(`One version keeps at most ${MAX_ASSETS} assets.`);
+            }
+
+            if (
+                Object.values(assets).reduce((total, asset) => total + asset.size, 0) >
+                MAX_ASSETS_BYTES
+            ) {
+                throw new Error(`Bundle assets are limited to ${MAX_ASSETS_BYTES} bytes.`);
+            }
+
+            for (const { asset, bytes } of prepared.values()) {
+                await tx.doc(ArtifactAssetDoc, asset.hash, { base64: bytes.toString("base64") });
+            }
+
             const next = (current?.versions.at(-1)?.version ?? 0) + 1;
             const record: ArtifactVersion = {
                 version: next,
@@ -294,6 +415,7 @@ async function publish(
                 size: Buffer.byteLength(content),
                 createdAt: Date.now(),
                 ...(inline ? { inline: true as const } : {}),
+                ...(Object.keys(assets).length > 0 ? { assets } : {}),
             };
 
             if (current === undefined) {
@@ -302,6 +424,16 @@ async function publish(
                 current.title = args.title;
                 current.type = type;
                 current.versions.push(record);
+            }
+
+            const meta = doc.items[id]!;
+
+            if (args.group !== undefined) {
+                meta.group = args.group;
+            }
+
+            if (args.kind !== undefined) {
+                meta.kind = args.kind;
             }
 
             const body = await tx.doc(ArtifactBodyDoc, api.conversationId, `${id}@${next}`, {
@@ -336,6 +468,47 @@ async function publish(
     };
 }
 
+const bundleParameters = {
+    assets: Type.Optional(
+        Type.Array(
+            Type.Object({
+                name: Type.String({
+                    description:
+                        "Relative bundle path, up to 200 characters. No dot or parent segments.",
+                }),
+                path: Type.Optional(
+                    Type.String({
+                        description: "Local regular file to copy, binary allowed, up to 5 MB.",
+                    }),
+                ),
+                content: Type.Optional(
+                    Type.String({
+                        description: "UTF-8 text. Give exactly one of path or content.",
+                    }),
+                ),
+            }),
+            {
+                maxItems: MAX_ASSETS,
+                description: "Add or replace assets. Earlier assets stay. Up to 20 MB per version.",
+            },
+        ),
+    ),
+    removeAssets: Type.Optional(
+        Type.Array(Type.String(), {
+            maxItems: MAX_ASSETS,
+            description: "Bundle paths to drop from this version.",
+        }),
+    ),
+    group: Type.Optional(
+        Type.String({
+            maxLength: 64,
+            pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            description: "Group variations under one lowercase kebab-case slug.",
+        }),
+    ),
+    kind: Type.Optional(Type.Union([Type.Literal("page"), Type.Literal("deck")])),
+};
+
 export default function createArtifacts(_host: PocketHost) {
     const artifact = defineTool({
         name: "artifact",
@@ -343,6 +516,7 @@ export default function createArtifacts(_host: PocketHost) {
             "Publish a viewable artifact (self-contained HTML page, Markdown document, or SVG image) that the user opens in the app's artifact viewer. " +
             "Calling again with the same id publishes a new version. Give exactly one of content, nonempty edits, or a local UTF-8 file path (up to 2,000,000 bytes).",
         parameters: Type.Object({
+            ...bundleParameters,
             id: Type.String({
                 description:
                     "Stable kebab-case id, for example solar-system. Reuse it for new versions.",
@@ -381,6 +555,7 @@ export default function createArtifacts(_host: PocketHost) {
             "Show an HTML page as a card in your reply, where the person uses it without leaving the conversation (Preview/Code, Run/Stop, and a button for the artifact viewer). " +
             "The same store as artifact: the same id adds a version, and each card keeps the version its call made. Give exactly one of content or nonempty edits.",
         parameters: Type.Object({
+            ...bundleParameters,
             id: Type.String({
                 description:
                     "Stable kebab-case id, for example loan-calculator. Reuse it for new versions.",
@@ -400,7 +575,16 @@ export default function createArtifacts(_host: PocketHost) {
         // Only its own fields: the model may send others, and a path or a type is the artifact tool's.
         execute: (args, api, context) =>
             publish(
-                { id: args.id, title: args.title, content: args.content, edits: args.edits },
+                {
+                    id: args.id,
+                    title: args.title,
+                    content: args.content,
+                    edits: args.edits,
+                    assets: args.assets,
+                    removeAssets: args.removeAssets,
+                    group: args.group,
+                    kind: args.kind,
+                },
                 api,
                 context,
                 true,

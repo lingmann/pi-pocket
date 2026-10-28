@@ -1605,7 +1605,7 @@ function RailTiles() {
         ${order.map(
             (session, index) => html`<button
                 key=${session.id}
-                class=${`ws ${session.id === conversationId ? "active" : ""} ${session.busy ? "busy" : ""} ${session.waiting ? "waiting" : ""}`}
+                class=${`ws ${session.id === conversationId ? "active" : ""} ${session.busy ? "busy" : ""} ${session.waiting ? "waiting" : ""} ${session.background > 0 ? "has-background" : ""}`}
                 style=${`--i:${index}`}
                 title=${`${session.title ?? "New session"}${index < 9 ? ` (Alt+${index + 1})` : ""}`}
                 aria-label=${`${session.title ?? "New session"}${session.waiting ? ", needs you" : session.busy ? ", working" : session.background > 0 ? ", running commands in the background" : ""}`}

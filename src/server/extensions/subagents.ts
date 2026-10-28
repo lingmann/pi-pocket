@@ -35,7 +35,7 @@ import {
     type TaskRuntime,
     type Tx,
 } from "@earendil-works/pi-durable";
-import { type PendingReport, REPORT_PREFIX, SubagentsDoc } from "../docs.ts";
+import { type PendingReport, PlanDoc, REPORT_PREFIX, SubagentsDoc } from "../docs.ts";
 import { describe } from "../errors.ts";
 import type { PocketHost } from "../host.ts";
 import { levelFor, sameModel, THINKING_LEVELS } from "../models.ts";
@@ -1028,6 +1028,12 @@ export default function createSubagents(host: PocketHost) {
                         ...(thinking === undefined ? {} : { thinkingLevel: thinking }),
                         ...(tools === undefined ? {} : { tools }),
                     });
+                    const plan = await tx.doc(PlanDoc, api.conversationId);
+
+                    if (plan.on) {
+                        Object.assign(await tx.doc(PlanDoc, child.id), plan);
+                    }
+
                     state.agents[name] = { conversationId: child.id, reported: [] };
                 }
 

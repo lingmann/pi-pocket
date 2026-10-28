@@ -4364,6 +4364,17 @@ pre.diff .del {
     background: linear-gradient(90deg, var(--accent), var(--spark));
 }
 
+/* Commands Pi runs in the background, with the session not working: the same underline, dashed and quiet. */
+.ws.has-background:not(.busy)::after {
+    content: "";
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    bottom: 3px;
+    height: 2px;
+    background: repeating-linear-gradient(90deg, var(--muted) 0 3px, transparent 3px 6px);
+}
+
 .ws .unread-dot {
     position: absolute;
     top: 4px;

@@ -105,6 +105,16 @@ Only people choose models; Pi, PiP, and Pi Pocket itself never pick one on the s
 - **No spend, no model choice.** A wait sends nothing but rejected requests. A gate never picks another model: only people do. Titles and PiP's summaries pass `noWait` and fail as they did.
 - **What people see.** The room view's `live.limit`, the session list's `limited` (a session's subagents too), the peek summary, and a subagent's `limited` on its bar and the board: the live line, the square (`limited`), peek tiles, and one push (kind `limit`) when a wait of ten minutes or more begins.
 
+## Prompt cache keeper
+
+`CacheKeeper` (`cache-keeper.ts`, `app.cacheKeeper`) wraps `models.streamSimple` as the outermost wrapper, so it sees each real request finish and replays it through the wrappers below. The order, innermost first, is the final payload observer, request shaping, `timing.ts`, `LimitGate`, then the keeper. A warm request passes `noWait`, so a limit makes it fail and never queue. It is on by default; `PI_POCKET_CACHE_KEEPER=off` turns it off.
+
+- **When.** A request that ended in a tool call is replayed with `maxTokens` 1 at 90% of the cache lifetime, or 10 seconds before its end, only when the expected savings are more than the cost. It never warms an idle session, a 1h cache, a request with `cacheRetention` none, or Anthropic thinking set by a token budget.
+- **Payload.** The observer hashes the real request's final JSON after all shapers. Before transmission, it compares each warm's final JSON with that hash. Only provider output-cap fields may differ. A changed or unobserved payload sends no warm and adds no spend.
+- **Stop.** A real cached request, the end of the run (PiP's too), a changed payload, an error, shutdown, or 30 minutes stops it.
+- **Spend.** A warm request's usage counts in `pi.usage` and in the spend of the person and session captured when it started. `Spend` checks their limits before each warm.
+- **Restart.** A restart discards the warm timers. It replays no warm request.
+
 ## Memory
 
 Lessons Pi keeps across sessions are one document for the whole app, `MemoryDoc` (`pocket.memory`), by id. Each is for a project or for everywhere. A project is keyed by the real path of its git common folder (`git rev-parse --git-common-dir`), so a repository and all its worktrees share lessons; outside a repository, by the folder itself. `Memory` (`memory.ts`) works out a folder's project (kept a minute per folder) and keeps the rules:
@@ -286,6 +296,19 @@ Victor runs recognition and speech in the foreground browser; the combined typed
 The `victor-reply-style` extension reads `host.victorReplyMode`, which resolves the last input in `LiveDoc.run.inputs` to its submission and source. It never reads queued inputs or infers mode from transcript text. Tool rounds and synthetic continuations keep the same run inputs; steering appends newly placed inputs, and follow-ups start new runs. This also survives compaction and restart without recovery caches. PiP and subagents are excluded. The section returns one stable voice or text instruction. In voice mode only, it reads the extension's instance-wide durable override, configured through the owner-only `/victor-style` command (see [voice configuration](victor.md#configure-the-voice-instruction)). A setting change applies at the next request preparation, including tool rounds; changing the client toggle alone does not alter an in-flight run.
 
 See [victor.md](victor.md) for setup, use, updates, and troubleshooting. Implementation details live in the Victor source and tests.
+
+## Updates of Pi Pocket itself
+
+The following describes the retained upstream updater. Victor uses [check-only release notices](victor.md#check-only-update-boundary) and does not install updates.
+
+`Updates` (`updates.ts`, `app.updates`) works out `installKind` from where the server's files are: a git checkout (`git`), the global package folder of the Node.js that runs it, as `npm root -g` gives it (`npm-global`), another `node_modules` folder (`npm-local`), the npx cache (`npx`), or none of these (`unknown`; `npm-install.ts` does the npm kinds). Every kind shares one status (`UpdateStatus`), one set of checks (the launcher runs the server, no sessions busy, the warning tick), the two settings of the `updates` extension, and the outcome format in `update-state.ts`. What differs is where the newest version comes from and how it goes in:
+
+- **The newest version.** An npm kind reads the registry's `latest` tag, and takes the notes, link, and date from the GitHub release of that version; if GitHub does not answer, the version stands without notes and is treated as one with a warning. A git checkout reads GitHub's newest release, or the version tags.
+- **Git.** The release's commit is fetched under `refs/pocket-update/target`, packages install in `.pocket-update/staging/`, and the branch moves forward.
+- **Global npm.** Only when the server's user can write the package and its parent folder, and the launcher advertises `PI_POCKET_NPM_ROLLBACK=1`. The new version installs through `npm-update.ts` in a separate global prefix under the sibling `.pi-pocket-update/staging/`. `update-state.ts` swaps the whole package, keeping the old one in `previous/`. The sibling folder also holds `pending.json` and `last.json`, so replacing the package does not replace recovery state. Before each server spawn, the launcher repairs a missing live folder from the pending update's copies; the server also checks before loading app modules. The launcher swaps the kept copy back when the server does not start; this needs no network. A successful start removes `previous/`. An older launcher requires a full quit and start before npm updates become available.
+- **Local npm and npx.** Nothing in the app can change these. Their status has a blocker with the command to run (`npm install pi-pocket@latest`, or `npx pi-pocket@latest`).
+
+A release with a warning (or notes that could not be read) is never installed by itself and is not rolled back by itself, whatever the kind. The browser module (`extensions/updates/index.js`) only shows `installKind` in words and the blockers the server gives: it holds no rule of its own.
 
 ## Checking a change
 

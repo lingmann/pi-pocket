@@ -151,6 +151,8 @@ export const InputSourceDoc = defineDocFamily<{ source?: InputSource }, null>({
 
 export type ArtifactType = "html" | "markdown" | "svg";
 
+export type ArtifactAsset = { hash: string; size: number; type: string };
+
 export type ArtifactVersion = {
     version: number;
     /** The tool task that wrote it; a replayed call finds its version instead of writing another. */
@@ -167,11 +169,15 @@ export type ArtifactVersion = {
      * artifact, and would change every version's page).
      */
     inline?: true;
+    /** Bundle paths map to immutable, content-addressed bytes. */
+    assets?: Record<string, ArtifactAsset>;
 };
 
 export type ArtifactMeta = {
     title: string;
     type: ArtifactType;
+    group?: string;
+    kind?: "page" | "deck";
     versions: ArtifactVersion[];
 };
 
@@ -196,6 +202,16 @@ export const ArtifactBodyDoc = defineDocFamily<{ content: string }, { content: s
     history: "latest",
     fork: "current",
     initial: (seed) => ({ content: seed.content }),
+});
+
+/** Immutable asset bytes, shared across conversations and keyed by their SHA-256 hash. */
+export const ArtifactAssetDoc = defineDocFamily<{ base64: string }, { base64: string }>({
+    kind: "pocket.artifact-asset",
+    version: 1,
+    ...rebased,
+    family: true,
+    scope: "session",
+    initial: (seed) => ({ base64: seed.base64 }),
 });
 
 /** What one person saved for one artifact (`artifact-state.ts`): a JSON value, the page's schema label, and when. */
@@ -881,5 +897,44 @@ export const RepoWatchesDoc = defineDoc<{ items: Record<string, RepoWatch> }>({
     version: 1,
     ...rebased,
     scope: "session",
+    initial: () => ({ items: {} }),
+});
+
+/** One comment on a design, pinned to an element of one version (`extensions/design.ts`). */
+export type DesignComment = {
+    id: string;
+    /** The artifact version it was made on. */
+    version: number;
+    /** The element it points at, as the page's inspector described it: shape-checked and cut to size by the server. */
+    target: JsonValue;
+    text: string;
+    /** Who wrote it, by id and by name when they did (the name is kept if the person is removed). */
+    by: string;
+    byName: string;
+    at: number;
+    /** Set when someone marked it done. */
+    resolved?: { by: string; at: number };
+};
+
+/** What a conversation keeps for one design artifact. */
+export type DesignItem = {
+    comments: DesignComment[];
+    /** Each person's tweak values for it, by person id: the knobs of the page's manifest and what was set. */
+    tweaks?: Record<string, { values: Record<string, string | number | boolean>; at: number }>;
+    /** Versions that "Go back to this one" made, by version: the version whose content they copy. */
+    restores?: Record<string, number>;
+};
+
+/**
+ * The Design workspace's own data (`extensions/design.ts`), by artifact id: shared comments, each person's tweaks, and
+ * which versions were restored from which. A fork starts with the current values, as its artifacts do.
+ */
+export const DesignCommentsDoc = defineDoc<{ items: Record<string, DesignItem> }>({
+    kind: "pocket.design-comments",
+    version: 1,
+    ...rebased,
+    scope: "conversation",
+    history: "latest",
+    fork: "current",
     initial: () => ({ items: {} }),
 });

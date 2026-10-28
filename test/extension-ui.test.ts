@@ -81,6 +81,7 @@ const POCKET_MEMBERS: Record<keyof Pocket, true> = {
     messages: true,
     reveal: true,
     insertText: true,
+    pip: true,
     arrange: true,
     toolCall: true,
     openPage: true,
@@ -224,6 +225,7 @@ before(async () => {
         join(dropIns, "shared", "index.js"),
         `export default (pocket) => {
 	pocket.rail({ id: "hi", title: "Shared", run: () => pocket.notify("info", "hi from shared") });
+	globalThis.sharedPocket = pocket;
 };
 `,
     );
@@ -902,6 +904,108 @@ test(
                 return "null";
             `);
             await page.setViewport(DESKTOP);
+        }
+    },
+);
+
+test(
+    "pocket.pip.ask drafts into PiP's box, sends only right after a tap, and tells a guest PiP is not there",
+    real,
+    async () => {
+        await page.navigate(`${base}/s/${session}`);
+        await until(() => has(rail("Meter")), "the meter's rail button");
+        await until(
+            () => inPage<boolean>(`return JSON.stringify(Boolean(globalThis.meterPocket))`),
+            "the meter's pocket",
+        );
+        // The submit goes nowhere: the test is about what the app sends, not about PiP's answer.
+        await page.evaluate(`
+            localStorage.removeItem("pocket.pip.draft");
+            globalThis.submitted = [];
+            const fetched = window.fetch;
+            window.fetch = (url, init) => {
+                if (String(url).endsWith("/submit")) {
+                    globalThis.submitted.push(JSON.parse(init.body).text);
+
+                    return Promise.resolve(new Response("{}", { headers: { "content-type": "application/json" } }));
+                }
+
+                return fetched(url, init);
+            };
+            document.body.insertAdjacentHTML("beforeend", '<button id="ask-pip" style="position:fixed;top:0;left:0;z-index:99999">Ask</button>');
+            document.querySelector("#ask-pip").onclick = async () => {
+                globalThis.asked = await globalThis.meterPocket.pip.ask("Look at this", { send: true });
+            };
+        `);
+
+        // Draft only, by default: PiP opens with the words, from the extension, and nothing is sent.
+        assert.deepEqual(
+            await withMeter(`return JSON.stringify(await pocket.pip.ask("Look at this"))`),
+            { ok: true, sent: false },
+        );
+        await until(
+            async () =>
+                (await inPage<string>(
+                    `return JSON.stringify(document.querySelector(".pip-composer textarea")?.value ?? "")`,
+                )) === "From the extension “meter”:\nLook at this",
+            "the draft in PiP's box",
+        );
+        assert.deepEqual(await inPage(`return JSON.stringify(globalThis.submitted)`), []);
+
+        // A send with no tap is refused, and drafts nothing more. A tap from before does not count.
+        await page.evaluate(`(await import("/taps.js")).spendTap()`);
+        assert.deepEqual(
+            await withMeter(
+                `return JSON.stringify(await pocket.pip.ask("Look at this", { send: true }))`,
+            ),
+            { ok: false, reason: "Sending needs a click or a key press just before" },
+        );
+        assert.deepEqual(await inPage(`return JSON.stringify(globalThis.submitted)`), []);
+
+        // A real click on the module's button sends, once.
+        await page.click({ selector: "#ask-pip" });
+        await until(
+            () => inPage<boolean>(`return JSON.stringify(globalThis.asked !== undefined)`),
+            "the answer",
+        );
+        assert.deepEqual(await inPage(`return JSON.stringify(globalThis.asked)`), {
+            ok: true,
+            sent: true,
+        });
+        assert.deepEqual(await inPage(`return JSON.stringify(globalThis.submitted)`), [
+            "From the extension “meter”:\nLook at this",
+        ]);
+        assert.deepEqual(
+            await withMeter(`return JSON.stringify(await pocket.pip.ask("Again", { send: true }))`),
+            { ok: false, reason: "Sending needs a click or a key press just before" },
+            "the click served one send",
+        );
+
+        // A guest has no PiP: a result, not an error.
+        const guest = app.config.addUser("Guest", "guest");
+        const other = await browsers.open(2);
+
+        try {
+            await other.navigate(`${base}/login?token=${encodeURIComponent(guest.token)}`);
+            await until(
+                async () =>
+                    JSON.parse(
+                        await other.evaluate(
+                            `return JSON.stringify(Boolean(globalThis.sharedPocket) && (await import("/store.js")).store.state.server !== undefined)`,
+                        ),
+                    ) as boolean,
+                "the guest's tab",
+            );
+            assert.deepEqual(
+                JSON.parse(
+                    await other.evaluate(
+                        `return JSON.stringify(await globalThis.sharedPocket.pip.ask("Look", { send: true }))`,
+                    ),
+                ),
+                { ok: false, reason: "PiP is not available" },
+            );
+        } finally {
+            app.config.removeUser(guest.user.id);
         }
     },
 );

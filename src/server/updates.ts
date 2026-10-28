@@ -7,16 +7,24 @@
  * when its lock file differs), notes the update in `.pocket-update/pending.json` (`update-state.ts`), puts the packages
  * in place, moves the checkout forward to the release's commit (never over a change of its own), and restarts. When
  * the new version starts, `recover` notes that it did; when it does not, the launcher goes back to the version before.
+ * Global npm installs use the registry's latest version with GitHub's notes. They stage a complete package beside the
+ * live one, then swap the package folders. Local installs and npx caches require their own npm command instead.
  * The `updates` extension module shows it to the owner, and checks and installs on a timer.
  */
 import { execFile } from "node:child_process";
-import { constants, existsSync, lstatSync, readFileSync } from "node:fs";
+import { constants, lstatSync, readFileSync } from "node:fs";
 import { access, mkdir, realpath, rm, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
+import { npmCommand, npmInstallKind, npmWritable, type InstallKind } from "./npm-install.ts";
 import { describe, HttpError } from "./errors.ts";
+import { stageNpmUpdate } from "./npm-update.ts";
 import { git, GitError } from "./git.ts";
 import {
+    clearPending,
     finishPending,
+    finishNpmPending,
+    restorePackage,
+    swapInPackage,
     type PendingUpdate,
     readOutcome,
     readPending,
@@ -46,6 +54,8 @@ export type Release = {
      * could not read. An update to it is treated as one with a warning: the owner's word first, and no going back.
      */
     unread?: boolean;
+    /** The npm release's Node.js requirement, checked before staging. */
+    node?: string;
 };
 
 /** The release may need care: its notes warn, or Pi Pocket could not read them to know. */
@@ -56,6 +66,7 @@ export function needsCare(release: Release): boolean {
 export type UpdateStatus = {
     /** The running version, and the checkout's commit and branch (null when detached). */
     version: string;
+    installKind: InstallKind;
     commit?: string;
     branch?: string | null;
     /** Where releases come from. */
@@ -91,6 +102,8 @@ export interface UpdatesOptions {
     supervised: boolean;
     /** The launcher goes back to the version before when a new one does not start. */
     rollback: boolean;
+    /** An older launcher can undo git updates but does not know the sibling npm update state. */
+    npmRollback?: boolean;
     restart: () => void;
     /**
      * Stop reloading what changes on disk (web files, extension modules) just before git moves the checkout, so the
@@ -194,10 +207,11 @@ function releaseOf(tag: string, fields: Partial<Release>): Release | undefined {
 async function githubRelease(
     repository: { owner: string; name: string },
     signal?: AbortSignal,
+    tag?: string,
 ): Promise<Release | undefined> {
     const timeout = AbortSignal.timeout(20_000);
     const response = await fetch(
-        `https://api.github.com/repos/${repository.owner}/${repository.name}/releases/latest`,
+        `https://api.github.com/repos/${repository.owner}/${repository.name}/releases/${tag === undefined ? "latest" : `tags/${encodeURIComponent(tag)}`}`,
         {
             headers: {
                 accept: "application/vnd.github+json",
@@ -217,20 +231,84 @@ async function githubRelease(
     }
 
     const body = (await response.json()) as Record<string, unknown>;
-    const tag = typeof body.tag_name === "string" ? body.tag_name : "";
-    const page = `https://github.com/${repository.owner}/${repository.name}/releases/tag/${tag}`;
-    const release = releaseOf(tag, {
-        name: typeof body.name === "string" && body.name.trim() !== "" ? body.name.trim() : tag,
-        notes: typeof body.body === "string" ? body.body.slice(0, MAX_NOTES) : "",
+    const notes = typeof body.body === "string" ? body.body : "";
+    const foundTag = typeof body.tag_name === "string" ? body.tag_name : "";
+    const page = `https://github.com/${repository.owner}/${repository.name}/releases/tag/${foundTag}`;
+    const release = releaseOf(foundTag, {
+        name:
+            typeof body.name === "string" && body.name.trim() !== "" ? body.name.trim() : foundTag,
+        notes: notes.slice(0, MAX_NOTES),
         url: page,
         ...(typeof body.published_at === "string" ? { publishedAt: body.published_at } : {}),
     });
 
     if (release === undefined) {
-        throw new Error(`The newest release's tag is not a version: ${tag.slice(0, 40)}`);
+        throw new Error(`The release's tag is not a version: ${foundTag.slice(0, 40)}`);
     }
 
-    return release;
+    // Read all notes for safety, even when only the first part is displayed.
+    return { ...release, warning: notesWarn(notes) };
+}
+
+/** npm's published latest version, with the notes for that exact version from GitHub. */
+export async function npmRelease(
+    repository: { owner: string; name: string } | undefined,
+    signal?: AbortSignal,
+): Promise<Release> {
+    const timeout = AbortSignal.timeout(20_000);
+    const response = await fetch("https://registry.npmjs.org/pi-pocket", {
+        headers: {
+            accept: "application/vnd.npm.install-v1+json",
+            "user-agent": "pi-pocket-updates",
+        },
+        signal: signal === undefined ? timeout : AbortSignal.any([signal, timeout]),
+    });
+
+    if (!response.ok) {
+        throw new Error(`npm answered ${response.status} for the newest release`);
+    }
+
+    const body = (await response.json()) as {
+        "dist-tags"?: { latest?: unknown };
+        versions?: Record<string, { engines?: { node?: unknown } }>;
+    };
+    const version = body["dist-tags"]?.latest;
+
+    if (typeof version !== "string" || !TAG.test(version) || version.startsWith("v")) {
+        throw new Error("npm's latest dist-tag is not a release version.");
+    }
+
+    const manifest = body.versions?.[version];
+
+    if (manifest === undefined) {
+        throw new Error("npm's latest dist-tag has no published package metadata.");
+    }
+
+    const tag = `v${version}`;
+    const node = manifest.engines?.node;
+    const fields = typeof node === "string" ? { node } : {};
+
+    if (repository !== undefined) {
+        const notes = await githubRelease(repository, signal, tag).catch(() => undefined);
+
+        if (notes?.version === version) {
+            return { ...notes, ...fields };
+        }
+    }
+
+    return {
+        tag,
+        version,
+        name: tag,
+        warning: false,
+        unread: true,
+        ...(repository === undefined
+            ? {}
+            : {
+                  url: `https://github.com/${repository.owner}/${repository.name}/releases/tag/${tag}`,
+              }),
+        ...fields,
+    };
 }
 
 /** The newest version tag of a repository anywhere git reaches, without notes. */
@@ -275,14 +353,6 @@ export function changedFiles(status: string): string[] {
 
 /** The oldest git updates work with: `--pathspec-from-file` came in 2.26. */
 const MIN_GIT = "2.26.0";
-
-/** The npm beside the Node.js that runs the server, else the one on `PATH`. */
-function npm(): { file: string; shell: boolean } {
-    const windows = process.platform === "win32";
-    const beside = join(dirname(process.execPath), windows ? "npm.cmd" : "npm");
-
-    return { file: existsSync(beside) ? beside : windows ? "npm.cmd" : "npm", shell: windows };
-}
 
 /**
  * What a failed program said, in its last lines; npm's help for the command, which it prints after the error itself
@@ -349,12 +419,22 @@ export class Updates {
     readonly checkOnly: string | undefined;
     readonly #listeners = new Set<(status: UpdateStatus) => void>();
     #latest: Release | undefined;
+    /** The last check asked npm, not GitHub. */
+    #fromNpm = false;
     #checkedAt: number | undefined;
     #error: string | undefined;
     #target: Target | undefined;
     #targetError: string | undefined;
     #checking: Promise<void> | undefined;
     #step: string | undefined;
+    #npmKind: Promise<InstallKind> | undefined;
+    #knownKind: InstallKind = "unknown";
+
+    async #installKind(local: Local): Promise<InstallKind> {
+        this.#knownKind = local.git ? "git" : await (this.#npmKind ??= npmInstallKind(this.#root));
+
+        return this.#knownKind;
+    }
 
     constructor(options: UpdatesOptions) {
         this.#options = options;
@@ -365,6 +445,12 @@ export class Updates {
 
     get #now(): number {
         return (this.#options.now ?? Date.now)();
+    }
+
+    #canRollBack(kind: InstallKind): boolean {
+        return (
+            this.#options.rollback && (kind !== "npm-global" || this.#options.npmRollback === true)
+        );
     }
 
     /** Hear each change: a check, and each step of an update. Returns how to stop. */
@@ -552,6 +638,7 @@ export class Updates {
         if (this.#step !== undefined && this.#step !== "Checking") {
             return {
                 version: this.#options.version,
+                installKind: this.#knownKind,
                 repository: this.repository,
                 ...(this.#latest === undefined ? {} : { latest: this.#latest }),
                 ...(this.#checkedAt === undefined ? {} : { checkedAt: this.#checkedAt }),
@@ -562,11 +649,12 @@ export class Updates {
                 busy: this.#options.busy(),
                 step: this.#step,
                 supervised: this.#options.supervised,
-                rollback: this.#options.rollback,
+                rollback: this.#canRollBack(this.#knownKind),
             };
         }
 
         const local = await this.#local().catch((): Local => ({ git: false }));
+        const installKind = await this.#installKind(local);
         const latest = this.#latest;
         const busy = this.#options.busy();
         let available = latest !== undefined && newer(latest.version, this.#options.version);
@@ -581,13 +669,35 @@ export class Updates {
                 );
             }
 
-            const gitVersion = await this.#gitVersion();
+            const gitVersion = local.git ? await this.#gitVersion() : undefined;
 
-            if (!local.git) {
+            if (installKind === "npm-global") {
+                packages = true;
+
+                if (!this.#canRollBack(installKind)) {
+                    blockers.push(
+                        "This launcher cannot recover npm updates. Quit Pi Pocket and start it again before updating from the app.",
+                    );
+                }
+
+                if (!(await npmWritable(this.#root))) {
+                    blockers.push(
+                        `The server's user cannot write to ${this.#root} and its global node_modules folder. Update it as the user who owns it with \`npm install -g pi-pocket@latest\` (a system install may need sudo).`,
+                    );
+                }
+
+                if (!nodeMeets(latest.node, process.versions.node)) {
+                    blockers.push(
+                        `${latest.tag} needs Node.js ${latest.node}, and this server runs ${process.versions.node}. Update Node.js first.`,
+                    );
+                }
+            } else if (!local.git) {
                 blockers.push(
-                    this.#root.split(sep).includes("node_modules")
-                        ? `This copy of Pi Pocket came from npm. When ${latest.tag} is on npm, update it with \`npm install -g pi-pocket@latest\` (or run \`npx pi-pocket@latest\`), then start it again.`
-                        : "This copy of Pi Pocket is not a git checkout. Update it the way you installed it.",
+                    installKind === "npm-local"
+                        ? "This is a local npm install. Update it with `npm install pi-pocket@latest` in that project, then start it again."
+                        : installKind === "npx"
+                          ? "This copy runs with npx. Stop it, then run `npx pi-pocket@latest`."
+                          : "This copy of Pi Pocket is not a git checkout. Update it the way you installed it.",
                 );
             } else if (gitVersion !== undefined && !atLeast(gitVersion, MIN_GIT)) {
                 blockers.push(
@@ -645,7 +755,7 @@ export class Updates {
                 }
             }
 
-            if (readPending(this.#root) !== undefined && this.#step === undefined) {
+            if (readPending(this.#root) !== undefined) {
                 blockers.push("An update is under way. Restart the server to finish it.");
             }
         }
@@ -669,7 +779,9 @@ export class Updates {
 
             if (packages) {
                 cautions.push(
-                    "The update installs new packages (`npm ci`): this can take a few minutes.",
+                    installKind === "npm-global"
+                        ? "The update stages a complete npm install before switching versions: this can take a few minutes."
+                        : "The update installs new packages (`npm ci`): this can take a few minutes.",
                 );
             }
 
@@ -690,6 +802,7 @@ export class Updates {
 
         return {
             version: this.#options.version,
+            installKind,
             ...(local.git ? { commit: local.commit, branch: local.branch } : {}),
             repository: this.repository,
             ...(latest === undefined ? {} : { latest }),
@@ -707,7 +820,7 @@ export class Updates {
                 return last === undefined ? {} : { last };
             })(),
             supervised: this.#options.supervised,
-            rollback: this.#options.rollback,
+            rollback: this.#canRollBack(installKind),
         };
     }
 
@@ -738,6 +851,11 @@ export class Updates {
             }
         } catch (error) {
             this.#error = describe(error);
+
+            // npm is the only word on what an npm install can get: a version it no longer confirms is not offered.
+            if (this.#fromNpm) {
+                this.#latest = undefined;
+            }
         } finally {
             this.#checkedAt = this.#now;
         }
@@ -750,11 +868,20 @@ export class Updates {
             throw new Error(problem);
         }
 
+        const kind = await this.#installKind(await this.#local());
+
+        this.#fromNpm = kind === "npm-global" || kind === "npm-local" || kind === "npx";
+
         if (this.#options.releases !== undefined) {
             return this.#options.releases(signal);
         }
 
         const github = githubRepository(this.repository);
+
+        if (this.#fromNpm) {
+            return npmRelease(github, signal);
+        }
+
         let failed: unknown;
 
         if (github !== undefined) {
@@ -866,6 +993,10 @@ export class Updates {
             throw new HttpError(409, `An update is under way: ${this.#step.toLowerCase()}.`);
         }
 
+        if (readPending(this.#root) !== undefined) {
+            throw new HttpError(409, "An update is under way. Restart the server to finish it.");
+        }
+
         this.#setStep("Checking");
 
         try {
@@ -892,6 +1023,16 @@ export class Updates {
 
             if (status.busy > 0 && options.allowBusy !== true) {
                 throw new HttpError(409, "Pi works in a session now: update when it is done.");
+            }
+
+            const stillWanted = () =>
+                options.stillWanted?.() ??
+                (this.#options.busy() > 0 && options.allowBusy !== true
+                    ? "Pi started to work in a session: update when it is done."
+                    : undefined);
+
+            if (status.installKind === "npm-global") {
+                return await this.#applyNpm(latest, stillWanted, options.by);
             }
 
             if (
@@ -928,11 +1069,7 @@ export class Updates {
                 }
             }
 
-            const reason =
-                options.stillWanted?.() ??
-                (this.#options.busy() > 0 && options.allowBusy !== true
-                    ? "Pi started to work in a session: update when it is done."
-                    : undefined);
+            const reason = stillWanted();
 
             if (reason !== undefined) {
                 throw new HttpError(409, reason);
@@ -1061,6 +1198,91 @@ export class Updates {
         }
     }
 
+    /** Stage a self-contained global package, then move it into the unchanged global bin link's target. */
+    async #applyNpm(
+        latest: Release,
+        stillWanted: () => string | undefined,
+        by?: string,
+    ): Promise<{ restarting: true; version: string }> {
+        const pending: PendingUpdate = {
+            v: 1,
+            kind: "npm-global",
+            tag: latest.tag,
+            fromVersion: this.#options.version,
+            toVersion: latest.version,
+            from: this.#options.version,
+            to: latest.version,
+            branch: null,
+            modules: false,
+            oneWay: needsCare(latest),
+            phase: "packages",
+            at: this.#now,
+        };
+
+        this.#options.log(
+            `Updating Pi Pocket from ${pending.fromVersion} to ${pending.toVersion}${by === undefined ? "" : ` (${by})`}.`,
+        );
+        // Someone started to work while npm staged the package: nothing failed, so no outcome is noted (as for git),
+        // and an install by itself tries this release again once the sessions are quiet.
+        let declined = false;
+
+        writePending(this.#root, pending);
+
+        try {
+            this.#setStep("Installing packages");
+            await stageNpmUpdate(this.#root, latest.version);
+            const reason = stillWanted();
+
+            if (reason !== undefined) {
+                declined = true;
+
+                throw new HttpError(409, reason);
+            }
+
+            this.#setStep(`Switching to ${latest.tag}`);
+            this.#options.quiesce?.(true);
+            swapInPackage(this.#root);
+        } catch (error) {
+            // No new server ran yet, so even a warning release can safely restore the package here.
+            // If restoration fails, keep the pending state and stopped watchers for launcher recovery.
+            try {
+                if (!restorePackage(this.#root)) {
+                    throw new Error("The previous npm package is missing.");
+                }
+
+                if (declined) {
+                    clearPending(this.#root);
+                } else {
+                    finishPending(
+                        this.#root,
+                        pending,
+                        false,
+                        `The update to ${latest.version} failed, so Pi Pocket stays at ${pending.fromVersion}: ${describe(error)}`,
+                        this.#now,
+                    );
+                }
+
+                this.#options.quiesce?.(false);
+            } catch (restoreError) {
+                throw new HttpError(
+                    500,
+                    `The update stopped part way (${describe(error)}), and restoring the package failed (${describe(restoreError)}). Restart the server to recover the previous version.`,
+                );
+            }
+
+            if (error instanceof HttpError) {
+                throw error;
+            }
+
+            throw new HttpError(500, `The npm update failed: ${describe(error)}`);
+        }
+
+        this.#setStep("Restarting");
+        setTimeout(() => this.#options.restart(), 500);
+
+        return { restarting: true, version: latest.version };
+    }
+
     /** The release's packages, installed in `staging/` from its lock file, while the checkout stays as it is. */
     async #install(commit: string): Promise<void> {
         const { staging } = updatePaths(this.#root);
@@ -1075,7 +1297,7 @@ export class Updates {
             );
         }
 
-        const { file, shell } = npm();
+        const { file, shell } = npmCommand();
 
         try {
             // Through a shell (Windows' npm.cmd), a path with spaces needs its quotes.
@@ -1108,6 +1330,19 @@ export class Updates {
             await rm(paths.staging, { recursive: true, force: true });
 
             return undefined;
+        }
+
+        if (pending.kind === "npm-global") {
+            const outcome = finishNpmPending(this.#root, pending, this.#now);
+
+            if (outcome.ok) {
+                await rm(paths.previous, { recursive: true, force: true }).catch(() => {});
+            }
+
+            await rm(paths.staging, { recursive: true, force: true });
+            this.#options.log(outcome.message);
+
+            return outcome;
         }
 
         const head = (await git(this.#root, ["rev-parse", "HEAD"]).catch(() => "")).trim();

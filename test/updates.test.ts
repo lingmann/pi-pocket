@@ -24,6 +24,7 @@ import {
     stopMeansRollBack,
     undoPartialSwitch,
     updatePaths,
+    writePending,
 } from "../src/server/update-state.ts";
 import {
     changedFiles,
@@ -151,6 +152,35 @@ const waitFor = async (check: () => boolean, what: string) => {
 
     assert.ok(check(), what);
 };
+
+test("apply never replaces recovery state from an unfinished update", async () => {
+    const { upstream, app, first } = setUp();
+    const unfinished = release(upstream, "1.1.0");
+
+    release(upstream, "1.2.0");
+    writePending(app, {
+        v: 1,
+        tag: "v1.1.0",
+        fromVersion: "1.0.0",
+        toVersion: "1.1.0",
+        from: first,
+        to: unfinished,
+        branch: "main",
+        modules: false,
+        phase: "switching",
+        oneWay: false,
+        at: 123,
+    });
+    const pending = readPending(app);
+    const { updates, restarts } = updater(app, upstream, () => releaseOf("1.2.0"));
+    const status = await updates.check();
+
+    assert.match(status.blockers.join("\n"), /An update is under way/);
+    await assert.rejects(updates.apply(), /An update is under way/);
+    assert.deepEqual(readPending(app), pending);
+    assert.equal(run(app, ["rev-parse", "HEAD"]), first);
+    assert.deepEqual(restarts, []);
+});
 
 test("versions, Node.js ranges, and release notes' warnings are read as the release notes guide writes them", () => {
     assert.equal(newer("0.23.0", "0.22.0"), true);
@@ -805,6 +835,7 @@ test("a server that starts on an update stopped part way puts it back, without r
 test("the install by itself takes only a release that needs no question, and the launcher goes back only for the version's fault", () => {
     const ready = {
         version: "1.0.0",
+        installKind: "git",
         repository: "x",
         available: true,
         blockers: [],

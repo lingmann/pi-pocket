@@ -269,7 +269,7 @@ function kill(pid: number, name: NodeJS.Signals): void {
 
 // ─── Words ──────────────────────────────────────────────────────────────────
 
-/** A length of time in words: 45s, 3m 12s, 2h 5m. */
+/** A length of time in words: 45s, 3m 12s, 3m 05s, 2h 05m. */
 export function duration(ms: number): string {
     const seconds = Math.max(0, Math.round(ms / 1000));
 
@@ -278,10 +278,10 @@ export function duration(ms: number): string {
     }
 
     if (seconds < 3600) {
-        return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+        return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
     }
 
-    return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+    return `${Math.floor(seconds / 3600)}h ${String(Math.floor(seconds / 60) % 60).padStart(2, "0")}m`;
 }
 
 /** How a task ended, in words, with what it left running. */
