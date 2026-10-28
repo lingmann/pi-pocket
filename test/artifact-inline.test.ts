@@ -462,6 +462,7 @@ test("one tap serves one follow-up: no other event of the same tap gives it back
 
     new Function(
         "window",
+        "document",
         "self",
         "location",
         "performance",
@@ -471,6 +472,7 @@ test("one tap serves one follow-up: no other event of the same tap gives it back
         body,
     )(
         window,
+        { readyState: "loading" },
         { origin: "null" },
         { origin: "null" },
         performance,

@@ -275,6 +275,38 @@ test(
     },
 );
 
+test(
+    "Design insertion releases Victor and preserves typed, spoken, and new text",
+    real,
+    async () => {
+        await fresh();
+        await type("Typed");
+        await activate("spoken");
+        await page.setViewport(VIEWPORTS.desktop);
+        await see(
+            `!!document.querySelector('nav[aria-label="Sessions and tools"] button[aria-label="Design"]')`,
+        );
+        await run(
+            `document.querySelector('nav[aria-label="Sessions and tools"] button[aria-label="Design"]').click()`,
+        );
+        await see(`!!document.querySelector('.dsn-idea')`);
+        assert.equal(await value("victor.state.phase"), "listening");
+        const idea = await value(`document.querySelector('.dsn-idea').textContent.trim()`);
+
+        await page.setViewport(VIEWPORTS.mobile);
+        await run(`document.querySelector('.dsn-idea').click()`);
+        await phase("off");
+        await see(
+            `document.querySelector('.composer textarea').value === ${JSON.stringify("Typed spoken\n\n")} + ${JSON.stringify(idea)}`,
+        );
+        assert.equal(
+            await value(`pocket.drafts.get(${JSON.stringify(first)})`),
+            `Typed spoken\n\n${idea}`,
+        );
+        assert.equal(await value(`document.querySelector('.composer textarea').readOnly`), false);
+    },
+);
+
 test("extension keys edit ordinary drafts but cannot write into Victor's draft", real, async () => {
     await fresh();
     await see("window.victorKeysLoaded === true");

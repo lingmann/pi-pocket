@@ -558,6 +558,16 @@ Since 0.19.0 · Experimental
 
 Puts text into the message box of the session that the tab shows, after what is there: on a new paragraph, or with `inline: true`, after a space. The person sends it, or not: it never sends. A sheet that shows closes, so the box shows. With no session open, it does nothing. Text past 100,000 characters throws.
 
+### `pip`
+
+```ts
+readonly pip: PipApi;
+```
+
+Since 0.26.0 · Experimental
+
+The part of `pocket` that talks to the person's PiP, their assistant. It has one method, `pip.ask`. See [`PipApi`](#pipapi).
+
 ### `arrange`
 
 ```ts
@@ -1093,6 +1103,34 @@ Since 0.20.0 · Experimental
 - `clipped`: true when `text` was cut.
 - `by`: who wrote it: their id and name, when known. A message from before Pi Pocket kept authors has neither.
 - `at`: when it was sent, in milliseconds since 1970 on the server's clock, or null.
+
+### `PipApi`
+
+```ts
+interface PipApi {
+    ask(text: string, options?: { send?: boolean }): Promise<PipAskResult>;
+}
+```
+
+Since 0.26.0 · Experimental
+
+- `ask(text, options)`: gives PiP `text` as the person's own message. PiP sees it as it sees typed text.
+    - The text starts with a line that names the module (`From the extension “Usage”:`), as an artifact's follow-up starts with its source. So the message never reads as a command, and the person and PiP know where it came from.
+    - By default, it opens PiP and puts the text in PiP's message box, after what is there. The person reads it, edits it, and sends it, or not.
+    - With `send: true`, it sends the text at once, but only just after the person tapped or pressed a key (other than Escape) anywhere in the app, as a tap serves an artifact's follow-up; it need not be on the module's own controls. One tap serves for 5 seconds and for one send, so ask only from the person's own action. Without a tap, nothing is sent or drafted, and the answer says why. If PiP cannot take the message (it is not ready, or the send fails), a notice says so and the text waits in the box.
+    - It works for a person who has PiP. For anyone else, and while the app does not know yet, it does not throw: the answer is `{ ok: false, reason }`.
+    - Text that is empty or past 100,000 characters throws, as `insertText` does.
+
+### `PipAskResult`
+
+```ts
+type PipAskResult = { ok: true; sent: boolean } | { ok: false; reason: string };
+```
+
+Since 0.26.0 · Experimental
+
+- `ok: true`: the text went to PiP. `sent` is true when it was sent, and false when it waits in PiP's message box.
+- `ok: false`: nothing happened. `reason` says why, in words for a person: `"PiP is not available"`, `"Sending needs a click or a key press just before"`, or that the module's version is no longer loaded. Do not match on the words: they can change.
 
 ### `ComposerKeySpec`
 

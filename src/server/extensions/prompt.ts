@@ -116,10 +116,18 @@ export default function createPrompt(host: PocketHost) {
             section("project_context", (input) => load(cwdOf(input)).context),
             section("skills", (input) => load(cwdOf(input)).skills, { tag: false }),
             section("environment", (input) => {
-                // The date only, so the prompt stays cache-friendly through the day.
-                const today = new Date().toISOString().slice(0, 10);
+                const base = `Working directory: ${cwdOf(input)}\nPlatform: ${process.platform}`;
 
-                return `Working directory: ${cwdOf(input)}\nPlatform: ${process.platform}\nToday: ${today}`;
+                // Off by default: a date in the system prompt changes once a day and rewrites the whole prompt cache.
+                // PI_POCKET_PROMPT_DATE=1 adds the local date back.
+                if (process.env.PI_POCKET_PROMPT_DATE !== "1") {
+                    return base;
+                }
+
+                const now = new Date();
+                const pad = (n: number) => String(n).padStart(2, "0");
+
+                return `${base}\nToday: ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
             }),
         ],
     });

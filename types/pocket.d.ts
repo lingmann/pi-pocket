@@ -2379,6 +2379,32 @@ export interface SwitchProps {
 }
 
 /**
+ * What `pocket.pip.ask` answers. It does not throw when PiP is not there: `reason` tells why nothing happened. `sent` is
+ * false when the text waits in PiP's message box.
+ * @since 0.26.0
+ * @experimental
+ */
+export type PipAskResult = { ok: true; sent: boolean } | { ok: false; reason: string };
+
+/**
+ * The part of `pocket` that talks to PiP.
+ * @since 0.26.0
+ * @experimental
+ */
+export interface PipApi {
+    /**
+     * Gives PiP text as the person's own message. By default it opens PiP and puts the text in its message box, after
+     * what is there, for the person to read, edit, and send. With `send: true` it sends the text at once, but only just
+     * after the person tapped or pressed a key: one tap serves for 5 seconds and for one send. The text starts with the
+     * module's title, so the person and PiP see where it came from. It resolves with `{ ok: false, reason }` when the
+     * person has no PiP, and when `send` has no tap to use. Text that is empty or past 100,000 characters throws.
+     * @since 0.26.0
+     * @experimental
+     */
+    ask(text: string, options?: { send?: boolean }): Promise<PipAskResult>;
+}
+
+/**
  * The app's API for a browser module: the argument of its default export.
  * @since 0.14.0
  */
@@ -2637,6 +2663,12 @@ export interface Pocket {
      * @experimental
      */
     insertText(text: string, options?: { inline?: boolean }): void;
+    /**
+     * Gives text to the person's PiP, their assistant.
+     * @since 0.26.0
+     * @experimental
+     */
+    readonly pip: PipApi;
     /**
      * Hides or reorders a slot's items, the app's own too. A person's own choices in Appearance → Layout win.
      * @since 0.19.0

@@ -38,7 +38,9 @@ npm install -g pi-pocket
 pi-pocket
 ```
 
-Or try it with `npx pi-pocket`. To change Pi Pocket's code, or to update it from the app, run a git checkout instead:
+Newer npm may print "install-scripts ... not yet covered by allowScripts" for `@google/genai` and `protobufjs`, which come from Pi's model library. The warning is expected: Pi Pocket needs neither script. `npm config set allow-scripts=@google/genai,protobufjs --location=user` quiets it by letting both run, which does no harm.
+
+Or try it with `npx pi-pocket`. To change Pi Pocket's code, run a git checkout instead:
 
 ```bash
 git clone https://github.com/TannerMidd/pi-pocket.git
@@ -53,7 +55,7 @@ While it runs: **q** quit · **r** restart server · **a** change access · **o*
 
 **Victor fork:** self-update is disabled. The update sheet only reports upstream releases for manual review; use the [fork workflow](docs/fork-workflow.md) and [Victor deployment steps](docs/victor.md#updates). The automatic update behavior below describes upstream Pi Pocket.
 
-**Updating:** Menu → **Update Pi Pocket** updates a git checkout run with `npm start` and restarts, and goes back by itself if the new version does not start ([features](docs/features.md)). By hand: stop the server, back up `~/.pi-pocket`, pull, run `npm install`, and start again. An npm install updates with `npm install -g pi-pocket@latest`. Read the [release notes](https://github.com/TannerMidd/pi-pocket/releases) first: 0.21.0 upgrades the database one way, so going back needs the backup.
+**Updating:** Menu → **Update Pi Pocket** updates a git checkout run with `npm start`, or a global npm install (`npm install -g pi-pocket`) that your user can write, and restarts. It goes back by itself if the new version does not start ([features](docs/features.md)). A local install (`npm install pi-pocket` in a project) and `npx pi-pocket` do not update from the app: the sheet says what to run, `npm install pi-pocket@latest` or `npx pi-pocket@latest`. By hand: stop the server, back up `~/.pi-pocket`, pull, run `npm install`, and start again; for a global install, run `npm install -g pi-pocket@latest`. If the machine stops at the very moment of the switch, `pi-pocket` may not start; `npm install -g pi-pocket` restores it. Read the [release notes](https://github.com/TannerMidd/pi-pocket/releases) first: 0.21.0 upgrades the database one way, so going back needs the backup.
 
 ### Other ways to run it
 
@@ -82,7 +84,7 @@ Choose a mode in the launcher, or pass `--access`:
 | `cloudflare` | Anyone with the link | Free https quick tunnel, no account; needs `cloudflared` |
 | `tailscale`  | Your tailnet         | Tailscale address only                                   |
 
-Other options: `--port` (8787), `--cwd`, `--data` (`~/.pi-pocket`), `--host`, and `-y` to reuse the last access choice. `npm start -- --help` lists them all. `PI_POCKET_BROWSER` and `PI_POCKET_BROWSER_ARGS` pick the built-in browser and its flags when Chromium or Chrome is not found by itself.
+Other options: `--port` (8787), `--cwd`, `--data` (`~/.pi-pocket`), `--host`, and `-y` to reuse the last access choice. `npm start -- --help` lists them all. `PI_POCKET_BROWSER` and `PI_POCKET_BROWSER_ARGS` pick the built-in browser and its flags when Chromium or Chrome is not found by itself. `PI_POCKET_PROMPT_DATE=1` puts today's date in Pi's system prompt; it is left out by default, so the prompt cache does not start over when the date changes. `PI_POCKET_CACHE_KEEPER=off` turns off the prompt cache keeper, which keeps a model's prompt cache warm while a run waits on a tool call ([features](docs/features.md)).
 
 ### HTTPS with Tailscale Serve
 
