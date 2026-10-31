@@ -114,6 +114,7 @@ import { PushStore } from "./push.ts";
 import { type ExtensionInfo, ExtensionLoader, linkTypes, prepareDropInFolder } from "./reload.ts";
 import { ResendTask } from "./resend.ts";
 import { type Client, reportingOf, Room, ROOM_DOCS, subagentView } from "./room.ts";
+import { whyUnanswered } from "./subagent-runs.ts";
 import { Schedules } from "./schedules.ts";
 import { BackgroundTasks } from "./background.ts";
 import { Shares } from "./share.ts";
@@ -173,6 +174,24 @@ export const MAX_PEEKS = 20;
  * ask, or the run broke. Stopped (`aborted`), cleared (`reset`), and replaced (`stale`) runs did not fail.
  */
 const FAILED_RUN = new Set(["model_error", "no_model", "faulted"]);
+
+/** The session list goes to every tab on each change: these bound what it carries. */
+const FAILURE_TEXT = 120;
+const ASK_SUBJECT = 200;
+const ASK_REASON = 200;
+const FAILED_AGENTS = 5;
+
+type SessionAsk = {
+    id: string;
+    conversationId: number;
+    tool: string;
+    subject: string;
+    reason: string;
+    requestedBy?: string;
+    form?: true;
+    at: number;
+    count: number;
+};
 
 /** A conversation's subagents document, as far as the app reads it. */
 type SubagentsValue = {
@@ -257,6 +276,20 @@ function countSubagents(
     }
 
     return counts;
+}
+
+function failedSubagents(
+    entries: readonly SubagentEntry[],
+): { name: string; conversationId: number; at: number }[] {
+    return entries
+        .filter((entry) => subagentState(entry) === "failed" && entry.dealt !== true)
+        .sort((a, b) => (b.answeredAt ?? 0) - (a.answeredAt ?? 0))
+        .slice(0, FAILED_AGENTS)
+        .map((entry) => ({
+            name: entry.name,
+            conversationId: Number(entry.conversationId),
+            at: entry.answeredAt ?? 0,
+        }));
 }
 
 export interface OpenOptions {
@@ -371,7 +404,7 @@ export class PocketApp {
      * Conversations whose last run ended because the model or provider failed (not stopped by someone), since this
      * server started: the session list marks them until their next run starts.
      */
-    readonly #failed = new Set<ConversationId>();
+    readonly #failed = new Map<ConversationId, string>();
     /** How many commands each session runs in the background now (`background.ts`): the list and status line show it. */
     readonly #background = new Map<ConversationId, number>();
     readonly #agents = new Map<ConversationId, AgentState>();
@@ -787,6 +820,7 @@ export class PocketApp {
             fetchPublic: createPublicFetch(),
             requesterOf: (conversationId) => this.attribution.requesterOf(conversationId),
             victorReplyMode: (id, context) => victorReplyMode(this, id, context),
+            roleOf: (personId) => this.config.userById(personId)?.role,
             on: (event, listener) => this.events.on(event, listener),
             ask: (request, askContext) => ask(this.approvals, request, askContext),
             hide: (value) => this.hidden.add(value),
@@ -1064,7 +1098,13 @@ export class PocketApp {
                     this.#sessions[String(change.value.conversationId)] !== undefined &&
                     !this.#failed.has(change.value.conversationId)
                 ) {
-                    this.#failed.add(change.value.conversationId);
+                    this.#failed.set(
+                        change.value.conversationId,
+                        whyUnanswered(change.value.reason, change.value.detail).slice(
+                            0,
+                            FAILURE_TEXT,
+                        ),
+                    );
                     sessionsChanged = true;
                 }
             }
@@ -2316,6 +2356,35 @@ export class PocketApp {
         }
     }
 
+    #oldestAsks(): Map<string, SessionAsk> {
+        const asks = new Map<string, SessionAsk>();
+
+        for (const request of this.approvals.all()) {
+            const session = String(this.rootOf(request.conversationId));
+            const kept = asks.get(session);
+
+            if (kept !== undefined && kept.at <= request.createdAt) {
+                kept.count++;
+
+                continue;
+            }
+
+            asks.set(session, {
+                id: request.id,
+                conversationId: Number(request.conversationId),
+                tool: request.tool,
+                subject: request.subject.slice(0, ASK_SUBJECT),
+                reason: request.reason.slice(0, ASK_REASON),
+                ...(request.requestedBy === undefined ? {} : { requestedBy: request.requestedBy }),
+                ...(request.form === undefined ? {} : { form: true as const }),
+                at: request.createdAt,
+                count: (kept?.count ?? 0) + 1,
+            });
+        }
+
+        return asks;
+    }
+
     /** The session list, with who is in each session and its newest chat message. Scoped people see only theirs. */
     sessions(user?: User) {
         const waiting = new Set(
@@ -2323,6 +2392,7 @@ export class PocketApp {
         );
         const people = new Map<string, Map<string, string>>();
         const subagents = this.#subagentsBySession();
+        const asks = this.#oldestAsks();
         // The sessions in a wait for a provider's limit, their subagents' included: when the next request goes out.
         const limited = new Map<string, number>();
 
@@ -2361,6 +2431,9 @@ export class PocketApp {
                 const endedAt = this.#endedAt.get(Number(id) as unknown as ConversationId);
                 const counts = countSubagents(subagents.get(id) ?? []);
                 const background = this.#background.get(Number(id) as unknown as ConversationId);
+                const failure = this.#failed.get(Number(id) as unknown as ConversationId);
+                const failedAgents = failedSubagents(subagents.get(id) ?? []);
+                const ask = asks.get(id);
                 // Which of Pi's sessions it continues is the owner's to know (the Pi sessions sheet), not the list's.
                 const { fromPi: _fromPi, linkedFrom, ...shown } = meta;
                 // Linking does not share the origin: do not leak its id to someone who only sees the new chat.
@@ -2387,9 +2460,9 @@ export class PocketApp {
                     waiting: waiting.has(id),
                     ...(limited.has(id) ? { limited: limited.get(id)! } : {}),
                     ...(endedAt === undefined ? {} : { endedAt }),
-                    ...(this.#failed.has(Number(id) as unknown as ConversationId)
-                        ? { failed: true }
-                        : {}),
+                    ...(failure === undefined ? {} : { failed: true, failure }),
+                    ...(failedAgents.length === 0 ? {} : { failedAgents }),
+                    ...(ask === undefined ? {} : { approval: ask }),
                     ...(model === undefined ? {} : { model: model.modelId }),
                     ...(here.length === 0 ? {} : { people: here }),
                     ...(chat === undefined ? {} : { chatAt: chat.at, chatBy: chat.userId }),
@@ -2590,11 +2663,13 @@ export class PocketApp {
                 .catch((error: unknown) => this.#log(`decision not recorded: ${describe(error)}`));
         }
 
-        await this.collab.activity(
-            conversationId,
-            user,
-            `${allow ? "allowed" : "denied"} the ${request.tool} call: ${snippet(request.subject, 120)}`,
-        );
+        const form = request.form;
+        const what =
+            form === undefined
+                ? `${allow ? "allowed" : "denied"} the ${request.tool} call: ${request.subject}`
+                : `${allow ? "answered" : "declined"}: ${form.fields.some((field) => field.choices) ? request.reason : request.subject}`;
+
+        await this.collab.activity(conversationId, user, snippet(what, 160));
 
         return true;
     }

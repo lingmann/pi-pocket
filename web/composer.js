@@ -11,6 +11,7 @@ import {
     planAvailable,
     suggestCommands,
 } from "./commands.js";
+import { withQuote } from "./quote-text.js";
 import { loadFiles, mentionAt, mentionText, suggestFiles } from "./files.js";
 import { remember, searchHistory, sentHistory } from "./history.js";
 import {
@@ -39,6 +40,7 @@ import { useVictorMode, VictorButton, VictorControls } from "./victor-controls.j
 import {
     APPLE,
     contextLevel,
+    fileUrl,
     formatBytes,
     formatTokens,
     html,
@@ -479,11 +481,24 @@ export function Composer() {
                 return { text, initialText: expandPastes(text, pastes) };
             },
             validateText(value) {
+                if (store.state.replyQuote) {
+                    return "Send or remove the reply quote before turning Victor on.";
+                }
+
                 return inlineFiles && MENTIONS_FILE.test(value)
                     ? "Turn Victor off to send mentioned files, or choose ‘Let Pi read them’ first."
                     : null;
             },
         });
+
+    const replyQuote = store.state.replyQuote;
+
+    useEffect(() => {
+        if (replyQuote && victorMode.active) {
+            victorMode.disable();
+            notify("info", "Victor turned off to keep the reply quote with your draft.");
+        }
+    }, [replyQuote, victorActive]);
 
     // An Interrupt is for the run it was chosen in: when Pi stops working, an unused one goes back to Steer, so it does
     // not stop the next run. Steer and Queue stay as the person chose.
@@ -733,6 +748,8 @@ export function Composer() {
         if (command.args || command.template) {
             update(`/${command.name} `);
             focusEnd();
+        } else if (store.state.replyQuote) {
+            notify("info", "A quote cannot go with a command. Remove the quote to run it.");
         } else {
             runCommand({ command, arg: "" }, `/${command.name}`);
         }
@@ -754,7 +771,9 @@ export function Composer() {
         !victorMode.blocksSend(conversationId) &&
         !sending &&
         !uploading &&
-        (text.trim() !== "" || files.some((file) => file.state === "done"));
+        (text.trim() !== "" ||
+            store.state.replyQuote ||
+            files.some((file) => file.state === "done"));
 
     /** What went out stays for ↑; its pastes are done with. */
     const sent = (full) => {
@@ -802,6 +821,14 @@ export function Composer() {
             return;
         }
 
+        // A command runs or expands only when it starts the message: a quote in front would stop that.
+        if (
+            store.state.replyQuote &&
+            (parsed || shell || template || text.trimStart().startsWith("/skill:"))
+        ) {
+            return notify("info", "A quote cannot go with a command. Remove the quote to run it.");
+        }
+
         // What shows is what goes: words still coming would land in the emptied box.
         dictation.stop(true);
         const full = expandPastes(text, pastes);
@@ -824,7 +851,7 @@ export function Composer() {
             .map((file) => file.attachment);
         const ok = await attempt(() =>
             actions.submit(
-                full,
+                withQuote(store.state.replyQuote, full),
                 attachments,
                 busy ? sendMode : "followUp",
                 inlineFiles && mentionsFiles,
@@ -840,6 +867,7 @@ export function Composer() {
             }
 
             sent(full);
+            store.set({ replyQuote: null });
             forget(files);
             setFiles([]);
 
@@ -847,6 +875,40 @@ export function Composer() {
                 box.current?.focus();
             }
         }
+    };
+
+    const editQueued = async (item) => {
+        const back = await attempt(() => actions.editQueued(item.id));
+
+        if (!back) {
+            return;
+        }
+
+        if (victorMode.active && store.state.conversationId === conversationId) {
+            victorMode.disable();
+            notify("info", "Victor turned off to keep the queued message added to your draft.");
+        }
+
+        const current = drafts.get(conversationId);
+        const at = back.text.length;
+
+        setReading(null);
+        update(current.trim() === "" ? back.text : `${back.text}\n${current}`, at);
+        setFiles((list) => [
+            ...back.attachments.map((attachment) => ({
+                key: uid(),
+                name: attachment.name,
+                size: attachment.size,
+                state: "done",
+                preview: attachment.mime.startsWith("image/") ? fileUrl(attachment.path) : null,
+                attachment,
+            })),
+            ...list,
+        ]);
+        requestAnimationFrame(() => {
+            box.current?.focus();
+            box.current?.setSelectionRange(at, at);
+        });
     };
 
     /** Put a message sent before into the box, to send again or change. */
@@ -1261,6 +1323,13 @@ export function Composer() {
                                 html`<div class="queued-actions">
                                     <button
                                         class="button small"
+                                        title="Take it back into the message box to change it"
+                                        onClick=${() => editQueued(item)}
+                                    >
+                                        Edit
+                                    </button>
+                                    <button
+                                        class="button small"
                                         title=${modeHint(item.mode === "steer" ? "followUp" : "steer")}
                                         onClick=${() =>
                                             attempt(() =>
@@ -1521,6 +1590,20 @@ export function Composer() {
                             )}
                         </div>`
                     }
+                    ${
+                        store.state.replyQuote &&
+                        html`<div class="quote-strip" data-part="quote-strip">
+                            <${Icon} name="reply" size=${13} />
+                            <span class="quote-strip-text">${store.state.replyQuote}</span>
+                            <button
+                                class="icon-button small"
+                                aria-label="Remove the quote"
+                                onClick=${() => store.set({ replyQuote: null })}
+                            >
+                                <${Icon} name="close" size=${12} />
+                            </button>
+                        </div>`
+                    }
                     <textarea
                         ref=${setBox}
                         rows="1"
@@ -1707,7 +1790,7 @@ function fitBox(element) {
 }
 
 /** A model's short name for the message box: "opus 4.5" for "Claude Opus 4.5". */
-const shortModel = (agent) =>
+export const shortModel = (agent) =>
     modelLabel(agent)
         // A provider's own prefix ("Anthropic: Claude Opus 4.5"), then the family's name.
         .replace(/^[^:]{1,24}:\s*/, "")
@@ -2076,7 +2159,7 @@ defineItem("status", {
             class=${`guard ${guard.enabled && !failed ? "" : "off"}`}
             aria-label=${`Lancet Guard ${state}`}
             title=${guard.detail}
-            onClick=${() => openSheet({ type: "extensions", tab: "installed" })}
+            onClick=${() => openSheet({ type: "extensions", tab: "installed", show: "built-in" })}
         >
             <${Icon} name="shield" size=${11} />
             <span><span class="word">guard${" "}</span>${state}</span>

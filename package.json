@@ -1,6 +1,6 @@
 {
     "name": "pi-pocket",
-    "version": "0.26.0",
+    "version": "0.27.0",
     "description": "A durable, multiplayer, mobile-first web app for Pi agents, built on Pi Durable",
     "keywords": [
         "pi",
@@ -44,7 +44,7 @@
         "start": "node bin/pi-pocket.js",
         "dev": "node bin/pi-pocket.js --cwd .",
         "check": "tsc --noEmit -p . && node test/types-file.ts && node docs-site/check-reference.mjs",
-        "test": "node --test test/*.test.ts",
+        "test": "node --test --test-concurrency=4 test/*.test.ts",
         "site:publish": "gh workflow run pages.yml",
         "format": "eslint --fix . && prettier --write .",
         "format:check": "prettier --check . && eslint .",

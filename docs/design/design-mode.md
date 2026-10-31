@@ -1,6 +1,6 @@
 # Design mode (0.26.0)
 
-Status: built. The four streams (A to D) are merged into `feat/design`, off `release/0.26.0`. This page is the plan, corrected where the build differs from it. Each place that changed says "Built:". What each stream built is in `notes-a.md` to `notes-d.md`; the words for the release are in `release-notes-design.md`.
+Status: built. The four streams (A to D) are merged into `feat/design`, off `release/0.26.0`. This page is the plan, corrected where the build differs from it. Each place that changed says "Built:". The words for the release are in `release-notes-design.md`.
 
 Design mode gives Pi Pocket what Claude Design has: a big canvas beside the chat, where Pi makes interactive designs (prototypes, screens, one-pagers, slide decks), and people point at them, comment, tweak, edit text, compare versions and variations, export, and hand off to code.
 

@@ -4,6 +4,7 @@ import {
     cleanUp,
     context,
     lastText,
+    loadTools,
     newSession,
     openApp,
     owner,
@@ -88,6 +89,8 @@ after(async () => {
 async function session(): Promise<ConversationId> {
     const id = await newSession(app);
 
+    // background waits for a search (`tool-search.ts`): Pi loads it first.
+    await loadTools(app, id, "background");
     started.add(id);
 
     return id;
@@ -1028,11 +1031,24 @@ test("a long log loses its oldest segments, and reads go on after them", { skip 
             notify: false,
         });
 
-        await until(() => segments(id, item.id).length >= 8, "a long log");
-        const first = segments(id, item.id)[0];
+        // Its watch trims the log at each tick, so waiting for 8 segments at once races: wait for the last line
+        // (a read would move the read position that this test checks).
+        await until(
+            () => {
+                const last = segments(id, item.id).at(-1);
 
+                return (
+                    last !== undefined &&
+                    readFileSync(join(dataDir, "background", String(id), last), "utf8").endsWith(
+                        "line 400 of the log\n",
+                    )
+                );
+            },
+            "the whole output",
+            30_000,
+        );
         await app.background.sweep();
-        assert.ok(!segments(id, item.id).includes(first!), "the oldest went");
+        assert.ok(!segments(id, item.id).includes(`${item.id}.log.aaaaaa`), "the oldest went");
 
         const read = (await app.background.read(id, item.id))!;
 

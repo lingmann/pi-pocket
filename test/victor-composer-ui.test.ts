@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import { fauxProvider } from "@earendil-works/pi-ai/providers/faux";
+import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { Browsers } from "../src/server/browser.ts";
 import { findBrowser } from "../src/server/browser/discovery.ts";
 import type { BrowserPage } from "../src/server/browser/page.ts";
@@ -16,6 +16,7 @@ import { type App, cleanUp, newSession, openApp, owner, root, until, work } from
 const chromium = findBrowser();
 const real = { skip: chromium === undefined ? "no Chromium-based browser" : false };
 let app: App;
+let model: ReturnType<typeof fauxProvider>;
 let server: Server;
 let browsers: Browsers;
 let page: BrowserPage;
@@ -62,7 +63,8 @@ before(async () => {
         window.victorKeysLoaded = true;
     };`,
     );
-    app = await openApp(fauxProvider());
+    model = fauxProvider();
+    app = await openApp(model);
     await app.setExtensionEnabled(owner(app), "victor-keys.ts", true);
     first = await newSession(app);
     second = await newSession(app);
@@ -306,6 +308,109 @@ test(
         assert.equal(await value(`document.querySelector('.composer textarea').readOnly`), false);
     },
 );
+
+test(
+    "a pending reply quote prevents Victor activation without consuming the draft",
+    real,
+    async () => {
+        await fresh();
+        await type("Typed");
+        await run(`pocket.quoteReply('A passage')`);
+        await see(`!!document.querySelector('.quote-strip')`);
+        await run(`document.querySelector('.victor-chip').click()`);
+        assert.equal(await value("victor.state.phase"), "off");
+        assert.equal(await value("audioCreated"), 0);
+        assert.equal(await value(`document.querySelector('.composer textarea').value`), "Typed");
+        assert.equal(await value("pocket.store.state.replyQuote"), "A passage");
+    },
+);
+
+test("quoting a reply releases Victor and keeps the typed and spoken draft", real, async () => {
+    await fresh();
+    model.setResponses([fauxAssistantMessage("A passage to discuss.")]);
+    await app.commands.submit(first, owner(app), { text: "Reply", requestId: "quote-source" });
+    await see(`!!document.querySelector('.reply')?.textContent.includes('A passage to discuss.')`);
+    await see(`!!document.querySelector('.victor-chip')`);
+    await type("Typed");
+    await activate("spoken");
+    await run(`
+        const reply = document.querySelector('.reply p');
+        reply.scrollIntoView({ block: 'center' });
+        const range = document.createRange(); range.selectNodeContents(reply);
+        getSelection().removeAllRanges(); getSelection().addRange(range);
+        document.dispatchEvent(new Event('selectionchange'));
+    `);
+    await see(`!!document.querySelector('.quote-reply-button')`);
+    await run(`document.querySelector('.quote-reply-button').click()`);
+    await phase("off");
+    await see(`document.querySelector('.composer textarea').value === 'Typed spoken'`);
+    assert.equal(await value("pocket.store.state.replyQuote"), "A passage to discuss.");
+    assert.equal(await value(`pocket.drafts.get(${JSON.stringify(first)})`), "Typed spoken");
+});
+
+test("a late queued edit releases Victor before restoring words and files", real, async () => {
+    await fresh();
+    const started = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const path = join(app.workspace.uploadDirectory(first), "lzx-1234abcd-queued.txt");
+    const attachment = { path, name: "queued.txt", mime: "text/plain", size: 3 };
+
+    writeFileSync(path, "abc");
+    model.setResponses([
+        async () => {
+            started.resolve();
+            await finish.promise;
+
+            return fauxAssistantMessage("Done");
+        },
+    ]);
+
+    try {
+        await app.commands.submit(first, owner(app), { text: "Wait", requestId: "edit-start" });
+        await started.promise;
+        await app.commands.submit(first, owner(app), {
+            text: "Queued words",
+            attachments: [attachment],
+            mode: "followUp",
+            requestId: "edit-queued",
+        });
+        await see(`!!document.querySelector('.queued-text')`);
+        await run(`
+            window.originalFetch = window.fetch;
+            window.fetch = async (...args) => {
+                const response = await originalFetch(...args);
+                if (String(args[0]).includes('/edit-queued')) {
+                    await new Promise(resolve => { window.finishEdit = resolve; });
+                }
+                return response;
+            };
+            document.querySelector('.queued-text').click();
+        `);
+        await see(`!!document.querySelector('.queued-actions')`);
+        await run(`document.querySelector('.queued-actions button').click()`);
+        await see(`typeof window.finishEdit === 'function'`);
+        finish.resolve();
+        await see(`!!document.querySelector('.victor-chip')`);
+        await type("Typed");
+        await activate("spoken");
+        await run(`window.fetch = originalFetch; finishEdit()`);
+        await phase("off");
+        await see(
+            `document.querySelector('.composer textarea').value === 'Queued words\\nTyped spoken'`,
+        );
+        assert.equal(
+            await value(`pocket.drafts.get(${JSON.stringify(first)})`),
+            "Queued words\nTyped spoken",
+        );
+        await see(`!!document.querySelector('[aria-label="Remove queued.txt"]')`);
+    } finally {
+        finish.resolve();
+        await run(
+            `if (window.originalFetch) window.fetch = originalFetch; window.finishEdit?.(); victor.disable()`,
+        );
+        await app.commands.abort(first, owner(app));
+    }
+});
 
 test("extension keys edit ordinary drafts but cannot write into Victor's draft", real, async () => {
     await fresh();

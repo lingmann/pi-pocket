@@ -381,7 +381,7 @@ function FontTools() {
             ${
                 look.builtIn
                     ? html`<strong>${set.ligatures ? "On" : "Off"}</strong>`
-                    : html`<div>
+                    : html`<div class="font-ligatures">
                           <${Switch}
                               on=${set.ligatures}
                               label="Ligatures"

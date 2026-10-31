@@ -61,7 +61,7 @@ const DEFAULTS = {
     sidebar: "open",
     /** The open sidebar's width, its borders, the rail, and the list's: a 254px list. */
     sidebarWidth: 312,
-    /** How the session list groups: "recent" (by day) or "folder". */
+    /** How the session list groups: "priority" (by what needs you), "recent" (by day), or "folder". */
     group: "recent",
     /** Other sessions' live work as peek tiles beside the session (a strip on narrow screens). Off until turned on. */
     peeks: false,
@@ -268,6 +268,18 @@ export function togglePin(id) {
     const pinned = isPinned(id)
         ? store.state.pinned.filter((each) => each !== id)
         : [...store.state.pinned, id];
+
+    localStorage.setItem(PINNED, JSON.stringify(pinned));
+    store.set({ pinned });
+}
+
+export function movePin(id, last) {
+    if (!isPinned(id)) {
+        return;
+    }
+
+    const others = store.state.pinned.filter((each) => each !== id);
+    const pinned = last ? [...others, id] : [id, ...others];
 
     localStorage.setItem(PINNED, JSON.stringify(pinned));
     store.set({ pinned });

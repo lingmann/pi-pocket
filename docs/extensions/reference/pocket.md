@@ -499,7 +499,7 @@ sessionAction(spec: SessionActionSpec): Added<SessionActionSpec>;
 
 Since 0.20.0 · Experimental
 
-Adds an action on sessions. It shows in the sheet that a finger held on a row opens, and in the bar under the list while sessions are selected (Ctrl/⌘+click, or Select). Its `run` gets the ids of the sessions, or its sheet gets them as the prop `sessions`. See [`SessionActionSpec`](#sessionactionspec).
+Adds an action on sessions. It shows in the sheet that a finger held on a row opens, in the menu that a right-click on a row opens, and in the bar under the list while sessions are selected (Ctrl/⌘+click, or Select). Its `run` gets the ids of the sessions, or its sheet gets them as the prop `sessions`. See [`SessionActionSpec`](#sessionactionspec).
 
 ### `sessionFilter`
 

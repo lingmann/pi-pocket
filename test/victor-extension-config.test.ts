@@ -38,7 +38,7 @@ const Settings = defineDoc<{ voiceInstruction?: string }>({
 const VOICE =
     "This reply is for Victor voice chat and will be read aloud. Respond conversationally in at most three short sentences. Avoid headings, lists, tables, code blocks, and long URLs. Offer to explain further rather than giving a long answer. These limits apply to user-facing replies, not tool calls or the work needed to answer correctly.";
 const TEXT =
-    "Use the normal response style for this conversation. The Victor voice-specific brevity and formatting restrictions do not apply to this reply.";
+    "Use this conversation's normal style. Victor voice-specific brevity and formatting restrictions do not apply.";
 const FILE = "victor-reply-style.ts";
 const answer = () => fauxAssistantMessage([fauxText("Done.")]);
 const stored = (app: App) => app.harness.snapshot(Settings, context);
