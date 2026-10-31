@@ -923,6 +923,10 @@ export type DesignItem = {
     tweaks?: Record<string, { values: Record<string, string | number | boolean>; at: number }>;
     /** Versions that "Go back to this one" made, by version: the version whose content they copy. */
     restores?: Record<string, number>;
+    accepted?: Record<
+        string,
+        { by: string; byName: string; at: number; rule: string; message: string }
+    >;
 };
 
 /**

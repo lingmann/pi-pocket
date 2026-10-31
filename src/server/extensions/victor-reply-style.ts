@@ -5,7 +5,7 @@ import { defineDoc, defineExtension, section } from "@earendil-works/pi-durable"
 import type { ExtensionWeb, PocketHost } from "../host.ts";
 
 const VOICE = `This reply is for Victor voice chat and will be read aloud. Respond conversationally in at most three short sentences. Avoid headings, lists, tables, code blocks, and long URLs. Offer to explain further rather than giving a long answer. These limits apply to user-facing replies, not tool calls or the work needed to answer correctly.`;
-const TEXT = `Use the normal response style for this conversation. The Victor voice-specific brevity and formatting restrictions do not apply to this reply.`;
+const TEXT = `Use this conversation's normal style. Victor voice-specific brevity and formatting restrictions do not apply.`;
 
 // "session" is the shared storage session, not an individual Pocket conversation.
 const ReplySettings = defineDoc<{ voiceInstruction?: string }>({

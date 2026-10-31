@@ -26,8 +26,10 @@ const ALWAYS_ALLOWED = new Set([
     "artifact",
     "artifact_inline",
     "design_preview",
+    "tool_search",
     "codemode",
     "subagent",
+    "ask",
 ]);
 /** What the browser may do in plan mode: look at pages, not act on them. */
 const BROWSER_LOOKS = new Set([

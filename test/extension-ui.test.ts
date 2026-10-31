@@ -394,6 +394,15 @@ test(
         await until(() => hasLabel("App row"), "the default App row without a session");
         assert.equal(await hasLabel("Session row"), false, "a Session row needs a session");
         await inPage(`(await import("/store.js")).closeSheet(); return "null";`);
+        // A closing sheet takes its history entry off a moment later: a route written before then is undone.
+        await until(
+            async () =>
+                (await inPage<number>(
+                    `return JSON.stringify(history.state?.pocket?.layers ?? 0)`,
+                )) === 0,
+            "the sheet's history entry to go",
+            30_000,
+        );
 
         await inPage(`(await import("/store.js")).navigate(${session}); return "null";`);
         await until(() => has(".composer"), "the session opens");
@@ -654,7 +663,7 @@ test("Lancet Guard stays on until its inline confirmation is accepted", real, as
     await page.navigate(`${base}/s/${session}`);
     await until(() => has(".composer"), "the conversation");
     await inPage(
-        `(await import("/store.js")).openSheet({ type: "extensions", tab: "installed" }); return "null";`,
+        `(await import("/store.js")).openSheet({ type: "extensions", tab: "installed", show: "built-in" }); return "null";`,
     );
     await until(() => has('.switch[aria-label="Lancet Guard: on"]'), "the guard switch");
     await settled();

@@ -231,6 +231,7 @@ test("the module keeps scheduled checks but hides auto-install and ignores a sta
                 return name === "check" ? checking : true;
             },
             route: () => {},
+            onSettings: () => () => {},
             onDispose: (cleanup: () => void) => dispose.push(cleanup),
         } as unknown as ExtensionWeb,
     );
@@ -238,7 +239,7 @@ test("the module keeps scheduled checks but hides auto-install and ignores a sta
     try {
         assert.deepEqual(
             fields.map((field) => field.name),
-            ["check"],
+            ["check", "beta"],
         );
         t.mock.timers.tick(2 * 60_000);
         await new Promise(setImmediate);
@@ -293,7 +294,7 @@ test("the real app enforces check-only routes and settings through reloads", asy
             assert.equal(settings.status, 200);
             assert.deepEqual(
                 settings.data.fields.map((field: { name: string }) => field.name),
-                ["check"],
+                ["check", "beta"],
             );
             assert.equal(
                 (await call("/api/extension-settings/updates", { auto: true }, "PUT")).status,

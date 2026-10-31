@@ -2,6 +2,7 @@ import {
     type App,
     cleanUp,
     lastText,
+    modelTexts,
     newSession,
     openApp,
     owner,
@@ -34,6 +35,18 @@ const real = {
 /** "risky please" calls a tool, which Lancet Guard asks about; everything else is echoed. */
 const route: FauxResponseStep = (request) => {
     const { text } = lastText(request as never);
+
+    if (text === "ask me") {
+        const options = [
+            { label: "Postgres", description: "One server" },
+            { label: "SQLite", description: "A file" },
+        ];
+        const questions = [{ header: "Database", question: "Which database?", options }];
+
+        return fauxAssistantMessage([fauxToolCall("ask", { questions })], {
+            stopReason: "toolUse",
+        });
+    }
 
     return text === "risky please"
         ? fauxAssistantMessage([fauxToolCall("bash", { command: "true" })], {
@@ -848,6 +861,44 @@ test("a reconnect that brings the same data keeps it, and draws no session row",
         const { options } = await import("preact");
         const { connect, store } = await import("/store.js");
         const settle = () => new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve)));
+        const { browserModuleState } = await import("/extension-ui.js");
+        // Extensions' browser modules load after the list shows, and each one that finishes draws every row again
+        // (extensionsRev). A module goes on after that too: the Updates module asks the server for its status and
+        // updates its menu entry whenever the answer comes, which under load is any time. That is theirs, not the
+        // reconnect's, so the count below ignores a draw whose only new prop is extensionsRev.
+        const loading = () => store.state.server.ui.some((each) => {
+            const status = browserModuleState(each.module)?.status;
+
+            return status !== "ready" && status !== "failed";
+        });
+
+        while (loading()) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+
+        await settle();
+        await settle();
+
+        // Every row's props as they are now: draw them all once with a new extensionsRev, and keep what each row got.
+        const baseline = new Map();
+        const early = options.diffed;
+
+        options.diffed = (vnode) => {
+            if (vnode.type?.name === "SessionRow") {
+                baseline.set(vnode.props.session.id, { ...vnode.props });
+            }
+
+            early?.(vnode);
+        };
+        store.set((state) => ({ extensionsRev: state.extensionsRev + 1 }));
+        await settle();
+        await settle();
+        options.diffed = early;
+
+        if (baseline.size === 0) {
+            throw new Error("no session row drew for the baseline");
+        }
+
         const keys = ["me", "models", "guard", "server", "themeList", "folderFavorites", "sessions"];
         const before = Object.fromEntries(keys.map((key) => [key, store.state[key]]));
         const stream = store.state.streamId;
@@ -858,7 +909,19 @@ test("a reconnect that brings the same data keeps it, and draws no session row",
         const diffed = options.diffed;
 
         options.diffed = (vnode) => {
-            rows += vnode.type?.name === "SessionRow" ? 1 : 0;
+            if (vnode.type?.name === "SessionRow") {
+                const was = baseline.get(vnode.props.session.id);
+                const props = Object.keys(vnode.props);
+
+                // A draw counts unless extensionsRev is new and every other prop is the one it had.
+                rows +=
+                    was !== undefined &&
+                    vnode.props.extensionsRev !== was.extensionsRev &&
+                    props.every((key) => key === "extensionsRev" || vnode.props[key] === was[key])
+                        ? 0
+                        : 1;
+            }
+
             diffed?.(vnode);
         };
         // The reconnect's own list must arrive before identity and draws are checked.
@@ -1025,6 +1088,25 @@ test("a call's mark keeps its circle while it waits for an approval", real, asyn
         padding: "0px",
         border: "0px",
     });
+});
+
+test("Pi's question shows its answers as buttons a thumb can tap", real, async () => {
+    // The test before fakes a guard that asks about every call.
+    await app.setExtensionEnabled(owner(app), "guard.ts", false);
+    const id = await newSession(app);
+    const heights = `return JSON.stringify([...document.querySelectorAll("button.ask-option")].map((b) => b.offsetHeight))`;
+
+    await fresh();
+    await goTo(id);
+    await app.commands.submit(id, owner(app), { text: "ask me", requestId: "ask-ui" });
+    await until(async () => (await inPage<number[]>(heights)).length === 2, "the answers", 20_000);
+    assert.ok((await inPage<number[]>(heights)).every((height) => height >= 44));
+    await page.evaluate(`document.querySelectorAll("button.ask-option")[1].click()`);
+    await page.evaluate(`document.querySelector(".approval.ask button[type=submit]").click()`);
+    await until(
+        async () => (await modelTexts(app, id)).join().includes("Database: SQLite"),
+        "the answer",
+    );
 });
 
 // Issue #131: a phone on its side with a notch. Another Chromium fakes the safe-area insets on its own page.

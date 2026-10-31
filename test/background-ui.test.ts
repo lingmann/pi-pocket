@@ -3,6 +3,7 @@ import {
     type App,
     cleanUp,
     lastText,
+    loadTools,
     newSession,
     openApp,
     owner,
@@ -93,6 +94,8 @@ after(async () => {
 test("a background task's end shows as a card with its last lines", real, async () => {
     const id = await newSession(app);
 
+    await loadTools(app, id, "background");
+
     await page.setViewport(VIEWPORTS.desktop);
     await page.navigate(`${base}/s/${id}`);
     await see(
@@ -154,6 +157,8 @@ test("a background task's end shows as a card with its last lines", real, async 
 
 test("output whose own line says it is the end is not taken for a cut one", real, async () => {
     const id = await newSession(app);
+
+    await loadTools(app, id, "background");
 
     await page.navigate(`${base}/s/${id}`);
     await see(

@@ -42,6 +42,7 @@ These members are public:
 - `notice(level, message, id?)`
 - `resolveModel(spec)`, `subagentModels()`, `modelProblem(ref, fresh?)`, `modelInfo(spec)` (exact local metadata, since 0.16.0)
 - `requesterOf(conversationId)`
+- `roleOf(personId)` (experimental, since 0.27.0)
 - `skillPaths()`, `skills(cwd)`
 - `heldBack(conversationId)`, `onLimitsChanged(listener)`
 - `linkedSessions`: `start`, `send`, `list` (experimental in 0.14, see [Experimental](#experimental))
@@ -160,6 +161,8 @@ Since 0.19.0, these `pocket` members are experimental too: `panel`, `openPanel`,
 Since 0.22.0, these are experimental too: `web.publicPage` and `web.links`; `host.ask`, `hide`, `commandEnv`, and `browser`; `host.on`; `web.provide`, `use`, `onService`, `settings`, `setting`, and `onSettings`; `pocket.settings` and `onSettings`; and their types. So are the `browser` tool's `action` and target arguments, for hooks.
 
 Since 0.26.0, `pocket.pip` (`ask`) is experimental, with `PipApi` and `PipAskResult`.
+
+Since 0.27.0, `host.roleOf(personId)` is experimental, and so is the `scroll` field of `host.browser`'s `snapshot()`.
 
 Since 0.20.0, the session list's extension points are experimental: `pocket.sessionChips`, `sessionAction`, `sessionFilter`, and `sessionSearch`, `WebRequest.sessions`, and their types. So is `pocket.composerKey`, with `ComposerKeySpec` and `ComposerBox`, and so are `pocket.onConversation`, `messages`, and `reveal`, with `MessagesOptions`, `MessagePage`, and `MessageInfo`. So are `host.registerModelProvider`, and `host.fetchPublic` with `PublicFetchInit`.
 

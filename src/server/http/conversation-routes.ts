@@ -167,6 +167,16 @@ export async function conversationRoutes(
         });
     }
 
+    if (third === "edit-queued" && method === "POST") {
+        const body = await readJson<{ submissionId?: number }>(request);
+
+        return json(
+            response,
+            200,
+            await app.commands.editQueued(id, user, Number(body.submissionId)),
+        );
+    }
+
     if (third === "move" && method === "POST") {
         const body = await readJson<{ submissionId?: number; mode?: string }>(request);
 

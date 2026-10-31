@@ -182,6 +182,12 @@ export interface Host {
      */
     requesterOf(conversationId: ConversationId): string | undefined;
     /**
+     * The role of a person by id: `"owner"`, `"guest"`, or `"viewer"`. It is `undefined` for an id that is not a person here.
+     * @since 0.27.0
+     * @experimental
+     */
+    roleOf(personId: string): Role | undefined;
+    /**
      * Listens to what happens in the app: sessions made, renamed, and archived, messages people send to Pi, and runs that start and end. Returns how to stop: pass it to `web.onDispose`. PiP's conversations send none.
      * @since 0.22.0
      * @experimental
@@ -449,11 +455,36 @@ export interface AskField {
      */
     name: string;
     /**
-     * What the card says above the field.
+     * What the card says above the field: one line of up to 80 characters, or 300 for a field with `choices`.
      * @since 0.22.0
      * @experimental
      */
     label: string;
+    /**
+     * A short tag over the field, such as "Database": up to 12 characters.
+     * @since 0.27.0
+     * @experimental
+     */
+    header?: string;
+    /**
+     * 2 to 4 answers to pick, with different labels, shown as buttons: the value is the label chosen. `secret` and
+     * `autocomplete` do not apply to such a field; its `placeholder` is for its `other` text.
+     * @since 0.27.0
+     * @experimental
+     */
+    choices?: AskChoice[];
+    /**
+     * With `choices`: one or more can be chosen, and the value is their labels, one per line.
+     * @since 0.27.0
+     * @experimental
+     */
+    multiple?: boolean;
+    /**
+     * With `choices`: the person can type an answer of their own instead, which is then the value.
+     * @since 0.27.0
+     * @experimental
+     */
+    other?: boolean;
     /**
      * A hidden input, as for a password.
      * @since 0.22.0
@@ -472,6 +503,26 @@ export interface AskField {
      * @experimental
      */
     autocomplete?: string;
+}
+
+/**
+ * An answer to pick on an ask's card (`AskField.choices`).
+ * @since 0.27.0
+ * @experimental
+ */
+export interface AskChoice {
+    /**
+     * One line of up to 60 characters: the field's value when it is chosen.
+     * @since 0.27.0
+     * @experimental
+     */
+    label: string;
+    /**
+     * One line of up to 160 characters, under the label.
+     * @since 0.27.0
+     * @experimental
+     */
+    description?: string;
 }
 
 /**
@@ -683,7 +734,17 @@ export interface BrowserPageHandle {
      * @since 0.22.0
      * @experimental
      */
-    snapshot(): Promise<{ text: string; controls: BrowserControl[]; truncated: boolean }>;
+    snapshot(): Promise<{
+        text: string;
+        controls: BrowserControl[];
+        truncated: boolean;
+        /**
+         * Where the page is scrolled, in CSS pixels: `y` is the top of the viewport, `viewport` its height, and `height` the page's.
+         * @since 0.27.0
+         * @experimental
+         */
+        scroll: { y: number; viewport: number; height: number };
+    }>;
     /**
      * What a target is: its description, its kind, and whether it is a field or a password field.
      * @since 0.22.0

@@ -122,12 +122,31 @@ export type AskForm = { title: string; text?: string; fields: AskField[]; submit
 /** The answer to an approval; an ask's also carries what the person typed, which no one else sees. */
 export type ApprovalAnswer = { allow: boolean; by: string; values?: Record<string, string> };
 
+/** An answer to pick on an ask's card (`AskField.choices`): a button with its label, and a line under it. */
+export interface AskChoice {
+    /** Up to 60 characters, one line: the value when it is chosen. */
+    label: string;
+    /** Up to 160 characters, one line. */
+    description?: string;
+}
+
 /** One field of an ask's card. */
 export interface AskField {
     /** The value's key in the answer: letters, digits, and _, starting with a letter. */
     name: string;
-    /** What the card says above the field. */
+    /** What the card says above the field: up to 80 characters, or 300 for a field with `choices` (its question). */
     label: string;
+    /** A short tag over the field, such as "Database": up to 12 characters. Since 0.27.0. */
+    header?: string;
+    /**
+     * 2 to 4 answers to pick, with different labels, shown as buttons; the value is the label chosen. Since 0.27.0.
+     * `secret` and `autocomplete` do not apply to such a field; `placeholder` is for its `other` text.
+     */
+    choices?: AskChoice[];
+    /** With `choices`: one or more can be chosen, and the value is their labels, one per line. Since 0.27.0. */
+    multiple?: boolean;
+    /** With `choices`: the person can type an answer of their own instead, which is then the value. Since 0.27.0. */
+    other?: boolean;
     /** A hidden input, as for a password. */
     secret?: boolean;
     /** What the field shows while empty. */
@@ -179,7 +198,13 @@ export interface BrowserPageHandle {
     readonly url: string;
     readonly title: string;
     /** The page as Pi reads it (`text`, with refs such as `[e12]`) and its controls as data. Refs last until the next. */
-    snapshot(): Promise<{ text: string; controls: BrowserControl[]; truncated: boolean }>;
+    snapshot(): Promise<{
+        text: string;
+        controls: BrowserControl[];
+        truncated: boolean;
+        /** Where the page is scrolled, in CSS pixels: the viewport's top and height, and the page's height. */
+        scroll: { y: number; viewport: number; height: number };
+    }>;
     /** What a target is: its description, its kind (an input's type, or a tag), and whether it is a field or a password. */
     inspect(
         target: BrowserTarget,
@@ -380,6 +405,12 @@ export interface PocketHost {
         context: Context,
     ): Promise<"text" | "victor" | undefined>;
     /**
+     * The role of a person by id, as core decides it; undefined for an id that is not a person here.
+     *
+     * @experimental In 0.27: it can change in a minor release (docs/extensions/policies/api-stability.md).
+     */
+    roleOf(personId: string): Role | undefined;
+    /**
      * Listen to what happens in the app: sessions made, renamed, and archived, messages people send to Pi, and
      * runs that start and end. Returns how to stop; pass that to `web.onDispose`. PiP's conversations send none.
      *
@@ -506,9 +537,13 @@ export interface PocketHost {
         | "review"
         | "share"
         | "shareTheme"
+        | "reach"
     >;
     /** Updates of Pi Pocket itself (`updates.ts`): its extension's routes are the owner's way to them. */
-    readonly updates: Pick<Updates, "status" | "check" | "apply" | "subscribe" | "checkOnly">;
+    readonly updates: Pick<
+        Updates,
+        "status" | "check" | "apply" | "subscribe" | "checkOnly" | "setBeta" | "beta"
+    >;
 }
 
 /**

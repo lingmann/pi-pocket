@@ -172,6 +172,16 @@ Since 0.3.0 · Stable
 
 The id of the person that Pi works for in a session now. This is the person whose message started Pi's current work.
 
+### `roleOf`
+
+```ts
+roleOf(personId: string): Role | undefined;
+```
+
+Since 0.27.0 · Experimental
+
+The role of a person by id: `"owner"`, `"guest"`, or `"viewer"`. It is `undefined` for an id that is not a person here. It reads the role that core uses, so a module does not keep its own copy. Use it with `requesterOf` to know if Pi works for the owner. It can change in a minor release. Check that it is there first: `host.roleOf?.(id)`.
+
 ### `heldBack`
 
 ```ts
@@ -527,18 +537,32 @@ Since 0.22.0 · Experimental
 interface AskField {
     name: string;
     label: string;
+    header?: string;
+    choices?: AskChoice[];
+    multiple?: boolean;
+    other?: boolean;
     secret?: boolean;
     placeholder?: string;
     autocomplete?: string;
 }
+
+interface AskChoice {
+    label: string;
+    description?: string;
+}
 ```
 
-Since 0.22.0 · Experimental
+Since 0.22.0 · Experimental. `header`, `choices`, `multiple`, `other`, and `AskChoice` since 0.27.0.
 
 - `name`: the value's key in the answer: letters, digits, and `_`, up to 40, starting with a letter. Each field's is its own.
-- `label`: what the card says above the field.
-- `secret`: a hidden input, as for a password.
-- `autocomplete`: a hint for the browser and the phone's keyboard, such as `username`, `current-password`, or `one-time-code`.
+- `label`: what the card says above the field, one line of up to 80 characters. A field with `choices` has its question here, up to 300.
+- `header`: a short tag over the field, such as "Database", up to 12 characters.
+- `choices`: 2 to 4 answers to pick, shown as buttons, with different labels. A choice's `label` is one line of up to 60 characters, and its `description`, under it, of up to 160. The field's value is the label chosen.
+- `multiple`: with `choices`, the person can choose one or more. The value is their labels, one per line, in the order of `choices`.
+- `other`: with `choices`, the person can type an answer of their own instead, and the value is what they typed. Its `placeholder` is the words of that field while it is empty.
+- A value that is not one of the choices (and with no `other`) is refused, with an error that names the field, never the value.
+- `secret`: a hidden input, as for a password. Not for a field with `choices`.
+- `autocomplete`: a hint for the browser and the phone's keyboard, such as `username`, `current-password`, or `one-time-code`. Not for a field with `choices`.
 
 ### `AskAnswer`
 
@@ -647,7 +671,12 @@ One control of a snapshot, as data, up to 500 of them.
 interface BrowserPageHandle {
     readonly url: string;
     readonly title: string;
-    snapshot(): Promise<{ text: string; controls: BrowserControl[]; truncated: boolean }>;
+    snapshot(): Promise<{
+        text: string;
+        controls: BrowserControl[];
+        truncated: boolean;
+        scroll: { y: number; viewport: number; height: number };
+    }>;
     inspect(
         target: BrowserTarget,
     ): Promise<{ label: string; kind: string; editable: boolean; password: boolean }>;
