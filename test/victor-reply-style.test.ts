@@ -4,6 +4,7 @@ import {
     cleanUp,
     context,
     lastText,
+    loadTools,
     newSession,
     openApp,
     owner,
@@ -390,8 +391,12 @@ for (const initial of ["victor", undefined] as const) {
 for (const source of ["victor", undefined] as const) {
     test(`queued Interrupt preserves ${source ?? "text"} style and the retained messages' sources`, async (t) => {
         const seen: Seen[] = [];
+        let messages: string[] = [];
         const { app, id } = await fixture(t, (request) => {
             seen.push(observe(request));
+            messages = request.messages
+                .filter((message) => message.role === "user")
+                .map((message) => lastText({ messages: [message] }).text);
 
             return seen.length === 1
                 ? fauxAssistantMessage([fauxText("word ".repeat(8000))])
@@ -405,14 +410,14 @@ for (const source of ["victor", undefined] as const) {
         const typed = await submit(app, id, { text: "Retained text" });
 
         await app.commands.moveQueued(id, owner(app), Number(moved.submissionId), "interrupt");
-        await until(() => seen.length === 4 && !app.isBusy(id), "all replacement replies");
+        await until(() => seen.length === 3 && !app.isBusy(id), "all replacement replies");
         assert.deepEqual(
             seen.map((each) => each.text),
-            ["Initial run", "Moved message", "Retained voice", "Retained text"],
+            ["Initial run", "Moved message", "Retained text"],
         );
+        assert.deepEqual(messages.slice(-2), ["Retained voice", "Retained text"]);
         (source === "victor" ? assertVoice : assertText)(seen[1]!);
-        assertVoice(seen[2]!);
-        assertText(seen[3]!);
+        assertText(seen[2]!);
 
         for (const [requestId, expected] of [
             [ownRequest(owner(app).id, `interrupt-${moved.submissionId}`), source ?? "text"],
@@ -793,6 +798,7 @@ test("subagents and PiP never inherit Victor style; a subagent report starts ord
         return answer();
     });
 
+    await loadTools(app, id, "subagent");
     await wait(app, (await submit(app, id, { text: "Delegate", source: "victor" })).submissionId);
     await until(
         () => seen.some((item) => item.text.startsWith("[subagent helper answered")),
