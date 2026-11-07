@@ -297,7 +297,7 @@ These are local issue groups, not published tracker issues. Only reachable failu
 
 **Status: fixed and regression-tested.** Potential loss of unsent recognized text on page departure/reload after a routine microphone/runtime failure. Also leaves error ownership active after connection/permission changes.
 
-**Reachable sequence:** activate with `Typed` → recognize `unfinished speech` → worker error (or audio failure) → `fail()` → `release()` removes `visibilitychange`, `pagehide`, and store subscription but retains owner/unsent text → pagehide/hidden or ownership change no longer calls disable. Storage still contains only `Typed`. An explicit Off click works, which hid this hole in existing failure tests.
+**Reachable sequence before repair:** activate with `Typed` → recognize `unfinished speech` → worker error (or audio failure) → `fail()` → `release()` removes `visibilitychange`, `pagehide`, and store subscription but retains owner/unsent text → pagehide/hidden or ownership change no longer calls disable. Storage still contains only `Typed`. An explicit Off click works, which hid this hole in existing failure tests.
 
 **Evidence:** `node --test --test-name-pattern='errors retain lifecycle' test/victor-mode.test.ts` failed for all eight lifecycle changes (navigation, hidden, pagehide, disconnect, reconnect, role, session access, driving turn): actual phase `error`, expected `off`. `node --test --test-name-pattern='leaving an errored' test/victor-composer-ui.test.ts` failed in an isolated Chromium app: actual persisted draft `Typed`, expected `Typed unfinished speech`.
 
@@ -305,13 +305,13 @@ These are local issue groups, not published tracker issues. Only reachable failu
 
 ### VSM-2 — P2: make failed registration retryable without duplicating concurrent attempts
 
-**Status: confirmed; repair pending.** A transient first `/sw.js` registration failure disables registration-based asset caching for the rest of the page lifetime. Later Victor activations can keep loading large assets without Victor's persistent cache; shared notification/share registration also cannot recover through another call.
+**Status: fixed and regression-tested.** A transient first `/sw.js` registration failure disables registration-based asset caching for the rest of the page lifetime. Later Victor activations can keep loading large assets without Victor's persistent cache; shared notification/share registration also cannot recover through another call.
 
-**Reachable sequence:** app startup calls `registerWorker()` → browser registration rejects/throws → `registering` becomes a fulfilled promise containing null → later Victor activation calls `waitForWorkerControl()` → `registerWorker()` reuses null instead of registering again. Failure settles the wait quickly, so it is not a timeout or missing controller event.
+**Reachable sequence before repair:** app startup calls `registerWorker()` → browser registration rejects/throws → `registering` becomes a fulfilled promise containing null → later Victor activation calls `waitForWorkerControl()` → `registerWorker()` reuses null instead of registering again. Failure settles the wait quickly, so it is not a timeout or missing controller event.
 
 **Evidence:** `node --test test/victor-registration.test.ts` failed in both rejection and synchronous-throw cases: observed one register call, expected two after a later attempt. Tests also require concurrent retry callers to share the new promise and reuse successful registration afterward.
 
-**Fix group:** clear only failed registration memoization; keep in-flight/success sharing and the 1.5-second control deadline. Update the existing shared failure test, which currently asserts sticky failure. Validate registration, notifications, Victor startup/caching, and browser caching behavior.
+**Fix:** rejected registration clears `registering`; synchronous failure returns null without memoizing it. In-flight and successful attempts still share one promise, and control waits retain their 1.5-second deadline. Both retry regressions now pass. The existing shared failure test now expects another attempt instead of asserting sticky failure. No background retry loop or notification-permission dependency was added.
 
 ## Investigated interleavings that are not confirmed bugs
 
@@ -325,6 +325,15 @@ These are local issue groups, not published tracker issues. Only reachable failu
 
 ## Validation ledger
 
-Initial reproduction: VSM-1 controller and isolated-browser regressions failed with the exact differences above; VSM-2 regressions failed for both failure modes. VSM-1 repair: controller/listening/adapter suites passed **154 tests**; the complete isolated composer browser suite passed **28 tests**, including persistence across reload after error/pagehide. `npm run check` passed. Changed files passed formatting and lint. VSM-2 repair and final checks follow.
+Initial reproduction: VSM-1 controller and isolated-browser regressions failed with the exact differences above; VSM-2 regressions failed for both failure modes. After both repairs, **347 tests passed, none failed or skipped**:
 
-Physical iPhone/Safari audio routing, actual recognition/synthesis quality, browser storage eviction under device pressure, and long-session reliability require separate qualification. The full upstream suite is not the default for these focused changes; see [validation policy](../AGENTS.override.md#validation).
+```sh
+node --test --test-concurrency=2 test/victor-{mode,listening,worker,composer-adapter,assets,http,cache,reply-style,extension-config,registration}.test.ts test/{voice,service-worker,notify}.test.ts
+node --test --test-concurrency=2 test/victor-composer-ui.test.ts test/victor-cache-ui.test.ts
+```
+
+The first command passed 318 tests; the second passed 29 isolated Chromium checks, including draft persistence across reload after error/pagehide and real service-worker cache persistence. Earlier focused red/green runs are subsets, not additional test counts.
+
+Also passed: `npm run check`, `npm --prefix docs-site run check` (documentation pages, references and links), ESLint and Prettier on changed files, immediate `node --check` on both changed web modules, and `git diff --check`. No outstanding failures were observed. No dependencies, stored document schemas, or live data were changed; no application restart was performed. Issues remain local to this document; nothing was published.
+
+Physical iPhone/Safari audio routing, actual recognition/synthesis quality, browser storage eviction under device pressure, and long-session reliability require separate qualification. The full upstream suite was not run for these focused changes; see [validation policy](../AGENTS.override.md#validation).

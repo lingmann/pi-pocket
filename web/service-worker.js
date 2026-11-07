@@ -10,9 +10,13 @@ export function registerWorker() {
     }
 
     try {
-        registering ??= navigator.serviceWorker.register("/sw.js").catch(() => null);
+        registering ??= navigator.serviceWorker.register("/sw.js").catch(() => {
+            registering = null;
+
+            return null;
+        });
     } catch {
-        registering = Promise.resolve(null);
+        return Promise.resolve(null);
     }
 
     return registering;

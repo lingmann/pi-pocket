@@ -191,7 +191,7 @@ test("registration rejection and synchronous failure resolve the wait without bl
 
             await api.waitForWorkerControl();
             assert.equal(await api.registerWorker(), null);
-            assert.deepEqual(serviceWorker.registrations, ["/sw.js"]);
+            assert.deepEqual(serviceWorker.registrations, ["/sw.js", "/sw.js"]);
             assert.equal(serviceWorker.listeners.size, 0);
         });
     }
