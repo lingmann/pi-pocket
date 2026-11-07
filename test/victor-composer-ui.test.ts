@@ -145,6 +145,10 @@ async function fresh() {
         navigator.mediaDevices.getUserMedia = async () => ({ getTracks: () => [{ stop() {}, addEventListener() {} }] });
         pocket.drafts.set(${JSON.stringify(first)}, '');
     `);
+    await run(
+        `document.querySelectorAll('.composer .files button[aria-label^="Remove "]').forEach(button => button.click())`,
+    );
+    await see(`document.querySelector('.composer .files') === null`);
     await type("");
 }
 
@@ -228,7 +232,11 @@ test("attachments and an outstanding typed submission prevent activation", real,
         `window.originalSubmit = pocket.actions.submit; pocket.actions.submit = () => new Promise(resolve => { window.finishSubmit = resolve }); document.querySelector('.send-button').click()`,
     );
     await see(`!!window.finishSubmit`);
-    await type("");
+    assert.equal(await value(`document.querySelector('.composer textarea').readOnly`), true);
+    assert.equal(
+        await value(`document.querySelector('.composer textarea').value`),
+        "pending typed message",
+    );
     await run(`document.querySelector('.victor-chip').click()`);
     await phase("off");
     assert.equal(await value("audioCreated"), 0);
@@ -321,7 +329,7 @@ test(
         assert.equal(await value("victor.state.phase"), "off");
         assert.equal(await value("audioCreated"), 0);
         assert.equal(await value(`document.querySelector('.composer textarea').value`), "Typed");
-        assert.equal(await value("pocket.store.state.replyQuote"), "A passage");
+        assert.equal(await value("pocket.store.state.replyQuote?.text"), "A passage");
     },
 );
 
@@ -340,11 +348,11 @@ test("quoting a reply releases Victor and keeps the typed and spoken draft", rea
         getSelection().removeAllRanges(); getSelection().addRange(range);
         document.dispatchEvent(new Event('selectionchange'));
     `);
-    await see(`!!document.querySelector('.quote-reply-button')`);
-    await run(`document.querySelector('.quote-reply-button').click()`);
+    await see(`!!document.querySelector('.quote-reply-action:not(.quote-reply-pip)')`);
+    await run(`document.querySelector('.quote-reply-action:not(.quote-reply-pip)').click()`);
     await phase("off");
     await see(`document.querySelector('.composer textarea').value === 'Typed spoken'`);
-    assert.equal(await value("pocket.store.state.replyQuote"), "A passage to discuss.");
+    assert.equal(await value("pocket.store.state.replyQuote?.text"), "A passage to discuss.");
     assert.equal(await value(`pocket.drafts.get(${JSON.stringify(first)})`), "Typed spoken");
 });
 
