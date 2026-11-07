@@ -78,6 +78,7 @@ export const SIDEBAR = [
             ["docs/architecture.md", "Architecture"],
             ["docs/features.md", "Features"],
             ["docs/victor.md", "On-device Victor"],
+            ["docs/victor-state-machines.md", "Victor state machines"],
             ["docs/fork-workflow.md", "Maintaining the shared fork"],
             ["docs/releases.md", "Releases and betas"],
             ["docs/release-notes.md", "Release notes"],

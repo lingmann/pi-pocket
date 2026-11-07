@@ -46,6 +46,7 @@ A drop-in extension stays when Pi Pocket updates, and the owner can turn it off 
 - [architecture.md](architecture.md): how the parts depend on each other, and the orders that they need.
 - [features.md](features.md): what each feature does, as people use it.
 - [victor.md](victor.md): on-device Victor setup, use, updates, and troubleshooting.
+- [victor-state-machines.md](victor-state-machines.md): Victor states, invariants, transitions, and confirmed issue evidence.
 - [fork-workflow.md](fork-workflow.md): shared-main PR rules, upstream-update recipes, and immutable release tags.
 - [releases.md](releases.md): the weekly release on Fridays, the betas between releases, and how to run a beta.
 - [release-notes.md](release-notes.md): how to write the notes of a release.

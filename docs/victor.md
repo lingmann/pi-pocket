@@ -134,7 +134,7 @@ After upstream merges, use the focused composer UI tests to check phone and narr
 
 ## Source files
 
-Use this map to locate the behavior being changed, identify boundaries it crosses, and choose [focused tests](#focused-test-coverage). The source and tests remain the authority for implementation details. Paths are relative to the repository root.
+Use this map to locate the behavior being changed, identify boundaries it crosses, and choose [focused tests](#focused-test-coverage). The [state-machine inventory](victor-state-machines.md) collects states, invariants, transition tables, and confirmed issues. The source and tests remain the authority for implementation details. Paths are relative to the repository root.
 
 ### Victor code and tooling
 
