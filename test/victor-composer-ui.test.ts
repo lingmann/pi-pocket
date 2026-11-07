@@ -586,6 +586,23 @@ test(
     },
 );
 
+test("leaving an errored Victor returns speech to the saved composer draft", real, async () => {
+    await fresh();
+    await type("Typed");
+    await activate("unfinished speech");
+    await run(`speechWorker.onmessage({ data: { type: 'error', message: 'Runtime failed' } })`);
+    await phase("error");
+    await run(`dispatchEvent(new PageTransitionEvent('pagehide'))`);
+    assert.equal(
+        await value(`pocket.drafts.get(${JSON.stringify(first)})`),
+        "Typed unfinished speech",
+    );
+    await phase("off");
+    await see(`document.querySelector('.composer textarea').value === 'Typed unfinished speech'`);
+    await page.navigate(`${base}/s/${first}`);
+    await see(`document.querySelector('.composer textarea')?.value === 'Typed unfinished speech'`);
+});
+
 async function beginVoiceSubmit(transcript = "spoken send it", posts = 1) {
     await run(`
         window.originalFetch = window.fetch;

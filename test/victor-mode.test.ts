@@ -583,9 +583,11 @@ class Harness {
                     (node) => node.disconnected && node.buffer === null && node.onended === null,
                 ),
         );
-        assert.equal(this.listeners.size, 0);
-        assert.equal(this.page.listenerCount, 0);
-        assert.equal(this.window.listenerCount, 0);
+        const owners = this.modes.filter((mode) => mode.active).length;
+
+        assert.equal(this.listeners.size, owners);
+        assert.equal(this.page.listenerCount, owners);
+        assert.equal(this.window.listenerCount, owners);
     }
 }
 
@@ -2033,6 +2035,48 @@ test("an acquisition from a disabled activation cannot install a worklet or fail
             assert.equal(h.worker.terminated, false);
         });
     }
+});
+
+test("errors retain lifecycle guards until the unsent draft is returned", async (t) => {
+    for (const [name, change] of Object.entries(lifecycleChanges)) {
+        await t.test(name, async (t) => {
+            const h = await setup(t);
+
+            await h.listen({ initialText: "Typed" });
+            h.partial("unfinished speech");
+            h.worker.emit({ type: "error", message: "Runtime failed" });
+            assert.equal(h.victor.state.phase, "error");
+            change(h);
+            assert.equal(h.victor.state.phase, "off");
+            assert.deepEqual(h.preserved, ["Typed unfinished speech"]);
+            h.victor.disable();
+            assert.deepEqual(h.preserved, ["Typed unfinished speech"]);
+            await h.released();
+        });
+    }
+});
+
+test("a rejected POST after error and pagehide restores only its original draft once", async (t) => {
+    const h = await setup(t);
+
+    h.deliveryWait = deferred<void>();
+    await h.listen({ initialText: "Typed" });
+    h.partial("words send it");
+    h.capture.emit({ type: "flushed" });
+    h.worker.emit({ type: "final", turn: h.worker.turn, text: "words send it" });
+    h.worker.emit({ type: "error", message: "Runtime failed" });
+    h.window.emit("pagehide");
+    assert.equal(h.victor.state.phase, "off");
+    assert.equal(h.victor.state.deliveryPending, true);
+    assert.deepEqual(h.preserved, []);
+    h.deliveryWait.reject(Object.assign(new Error("rejected"), { status: 403 }));
+    await settle();
+    assert.equal(h.victor.state.deliveryPending, false);
+    assert.deepEqual(h.preserved, ["Typed words"]);
+    h.window.emit("pagehide");
+    h.victor.disable();
+    assert.deepEqual(h.preserved, ["Typed words"]);
+    assert.equal(h.submissions.length, 1);
 });
 
 test("stale worklet callbacks and track-ended events cannot mutate the resumed capture", async (t) => {

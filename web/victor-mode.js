@@ -355,10 +355,6 @@ function stopCapture() {
 /** Invalidate callbacks before cancelling speech or stopping tracks: both can dispatch more events. */
 function release() {
     epoch++;
-    unsubscribe?.();
-    unsubscribe = null;
-    document.removeEventListener("visibilitychange", hidden);
-    removeEventListener("pagehide", leave);
 
     for (const name of timers.keys()) {
         clearTimer(name);
@@ -389,6 +385,10 @@ function disable() {
     const draft = unsent ? victorMode.state.text : "";
     const preserve = owner?.preserveDraft;
 
+    unsubscribe?.();
+    unsubscribe = null;
+    document.removeEventListener("visibilitychange", hidden);
+    removeEventListener("pagehide", leave);
     release();
     owner = null;
     unsent = false;

@@ -332,7 +332,7 @@ Victor runs recognition and speech in the foreground browser; the combined typed
 
 The `victor-reply-style` extension reads `host.victorReplyMode`, which resolves the last input in `LiveDoc.run.inputs` to its submission and source. It never reads queued inputs or infers mode from transcript text. Tool rounds and synthetic continuations keep the same run inputs; steering appends newly placed inputs, and follow-ups start new runs. This also survives compaction and restart without recovery caches. PiP and subagents are excluded. The section returns one stable voice or text instruction. In voice mode only, it reads the extension's instance-wide durable override, configured through the owner-only `/victor-style` command (see [voice configuration](victor.md#configure-the-voice-instruction)). A setting change applies at the next request preparation, including tool rounds; changing the client toggle alone does not alter an in-flight run.
 
-See [victor.md](victor.md) for setup, use, updates, and troubleshooting. Implementation details live in the Victor source and tests.
+See [victor.md](victor.md) for setup, use, updates, and troubleshooting, and [Victor state machines](victor-state-machines.md) for ownership lifetimes, transitions, and confirmed issue evidence. Implementation details live in the Victor source and tests.
 
 ## Updates of Pi Pocket itself
 
