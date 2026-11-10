@@ -421,8 +421,8 @@ for (const source of ["victor", undefined] as const) {
 
         for (const [requestId, expected] of [
             [ownRequest(owner(app).id, `interrupt-${moved.submissionId}`), source ?? "text"],
-            [`${voice.requestId}~${moved.submissionId}`, "victor"],
-            [`${typed.requestId}~${moved.submissionId}`, "text"],
+            [`${voice.requestId}~${voice.submissionId}`, "victor"],
+            [`${typed.requestId}~${typed.submissionId}`, "text"],
         ]) {
             assert.equal(
                 (await app.harness.snapshot(InputSourceDoc, id, requestId!, context))?.source,
@@ -431,6 +431,28 @@ for (const source of ["victor", undefined] as const) {
         }
     });
 }
+
+test("sending a Victor message held by Stop keeps its conversational reply style", async (t) => {
+    // Stop and Send must carry queued speech through replacement requests; Interrupt coverage never exercises HeldDoc.
+    const seen: Seen[] = [];
+    const { app, id } = await fixture(t, (request) => {
+        seen.push(observe(request));
+
+        return seen.length === 1
+            ? fauxAssistantMessage([fauxText("word ".repeat(8000))])
+            : answer();
+    });
+
+    await submit(app, id, { text: "Initial run" });
+    await until(() => seen.length === 1, "the streaming request");
+    await submit(app, id, { text: "Held voice", source: "victor" });
+    await app.commands.abort(id, owner(app));
+    await until(() => !app.isBusy(id), "the stopped run");
+    assert.equal(await app.commands.sendHeld(id, owner(app)), 1);
+    await until(() => seen.length === 2 && !app.isBusy(id), "the held reply");
+    assert.equal(seen[1]!.text, "Held voice");
+    assertVoice(seen[1]!);
+});
 
 test("replacement sources survive restart, repeated requeue, legacy inputs, and conflicting retries", async (t) => {
     const seen: Seen[] = [];
