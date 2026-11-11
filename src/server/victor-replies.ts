@@ -1,5 +1,5 @@
 /** Durable input attribution for Victor's per-run reply style; no browser-global voice state. */
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { type ConversationId, LiveDoc, type Tx } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import { InputSourceDoc, type InputSource } from "./docs.ts";
