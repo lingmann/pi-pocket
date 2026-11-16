@@ -59,6 +59,7 @@ const ORDER = [
     "memory.ts",
     "pip.ts",
     "triggers.ts",
+    "pocket-relay.ts",
     "gallery.ts",
     "session-tags.ts",
     "ask.ts",
@@ -82,6 +83,7 @@ const OFF_BY_DEFAULT = new Set([
     "anthropic-subscription.ts",
     "session-tags.ts",
     "ask-someone.ts",
+    "pocket-relay.ts",
 ]);
 const TITLES: Record<string, string> = {
     "prompt.ts": "System prompt",
@@ -101,6 +103,7 @@ const TITLES: Record<string, string> = {
     "pip.ts": "PiP",
     "triggers.ts": "Triggers",
     "victor-reply-style.ts": "Victor reply style",
+    "pocket-relay.ts": "Relay",
     "gallery.ts": "Extension gallery",
     "session-tags.ts": "Session tags",
     "ask.ts": "Ask",
@@ -151,6 +154,7 @@ export const BUILT_IN_TOOLS: ReadonlySet<string> = new Set([
     "design_preview",
     "design_export",
     "design_system",
+    "relay_reply",
 ]);
 
 /** Pi Pocket's own modules, or the owner's from the drop-in folder. */
