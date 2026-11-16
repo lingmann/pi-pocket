@@ -146,9 +146,10 @@ async function fresh() {
         pocket.drafts.set(${JSON.stringify(first)}, '');
     `);
     await run(
-        `document.querySelectorAll('.composer .files button[aria-label^="Remove "]').forEach(button => button.click())`,
+        `document.querySelectorAll('.composer .files button[aria-label^="Remove "], .composer .quote-strip button[aria-label="Remove the quote"]').forEach(button => button.click())`,
     );
     await see(`document.querySelector('.composer .files') === null`);
+    await see(`document.querySelector('.composer .quote-strip') === null`);
     await type("");
 }
 
@@ -324,12 +325,18 @@ test(
         await fresh();
         await type("Typed");
         await run(`pocket.quoteReply('A passage')`);
-        await see(`!!document.querySelector('.quote-strip')`);
+        await see(`!!document.querySelector('.quote-block')`);
         await run(`document.querySelector('.victor-chip').click()`);
         assert.equal(await value("victor.state.phase"), "off");
         assert.equal(await value("audioCreated"), 0);
-        assert.equal(await value(`document.querySelector('.composer textarea').value`), "Typed");
-        assert.equal(await value("pocket.store.state.replyQuote?.text"), "A passage");
+        assert.equal(
+            await value(`document.querySelector('.composer textarea').value`),
+            "Typed\n> A passage\n",
+        );
+        assert.equal(
+            await value(`pocket.drafts.get(${JSON.stringify(first)})`),
+            "Typed\n> A passage\n",
+        );
     },
 );
 
@@ -339,6 +346,7 @@ test("quoting a reply releases Victor and keeps the typed and spoken draft", rea
     await app.commands.submit(first, owner(app), { text: "Reply", requestId: "quote-source" });
     await see(`!!document.querySelector('.reply')?.textContent.includes('A passage to discuss.')`);
     await see(`!!document.querySelector('.victor-chip')`);
+    await run(`(await import('/theme.js')).setPrefs({ quoteStyle: 'separate' })`);
     await type("Typed");
     await activate("spoken");
     await run(`
@@ -352,8 +360,15 @@ test("quoting a reply releases Victor and keeps the typed and spoken draft", rea
     await run(`document.querySelector('.quote-reply-action:not(.quote-reply-pip)').click()`);
     await phase("off");
     await see(`document.querySelector('.composer textarea').value === 'Typed spoken'`);
-    assert.equal(await value("pocket.store.state.replyQuote?.text"), "A passage to discuss.");
+    assert.equal(
+        await value(`document.querySelector('.quote-strip').textContent.trim()`),
+        "A passage to discuss.",
+    );
     assert.equal(await value(`pocket.drafts.get(${JSON.stringify(first)})`), "Typed spoken");
+    await run(`document.querySelector('.victor-chip').click()`);
+    await phase("off");
+    assert.equal(await value("audioCreated"), 1);
+    await run(`(await import('/theme.js')).setPrefs({ quoteStyle: 'fade' })`);
 });
 
 test("a late queued edit releases Victor before restoring words and files", real, async () => {
