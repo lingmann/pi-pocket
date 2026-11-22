@@ -635,6 +635,34 @@ async function beginVoiceSubmit(transcript = "spoken send it", posts = 1) {
     await see(`voicePosts.length === ${posts}`);
 }
 
+// An annotated voice turn goes through the real submit and transcript; separate note and controller tests miss false competing-message detection.
+test("Victor speaks the reply to a turn with an extension note", real, async () => {
+    await fresh();
+    const removeNote = app.turnNotes.add("test-victor", () => "Context from the extension.");
+
+    model.setResponses([fauxAssistantMessage("This is the reply.")]);
+
+    try {
+        await activate("");
+        await run(`
+            const post = speechWorker.postMessage.bind(speechWorker);
+            speechWorker.postMessage = message => {
+                if (message.type === 'synthesize') window.spokenReply = message.text;
+                post(message);
+            };
+            window.finalTranscript = 'An annotated voice turn send it';
+            speechWorker.onmessage({ data: { type: 'partial', turn: speechWorker.turn, text: finalTranscript } });
+        `);
+        await see(
+            `!!document.querySelector('.turn-note')?.textContent.includes('Context from the extension.')`,
+        );
+        await see(`window.spokenReply === 'This is the reply.'`);
+    } finally {
+        removeNote();
+        await run(`victor.disable()`);
+    }
+});
+
 test("a changed saved draft prevents Victor submission and keeps both texts", real, async () => {
     await fresh();
     await type("Original");
